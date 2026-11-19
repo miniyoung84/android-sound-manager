@@ -10,6 +10,8 @@ cancel button that stops the transfer.
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 from collections.abc import Callable
@@ -93,6 +95,60 @@ def build_options(
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": codec}],
         "progress_hooks": [hook],
     }
+
+
+def installed_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("yt-dlp")
+    except PackageNotFoundError:
+        return "not installed"
+
+
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def update_downloader() -> tuple[str, str]:
+    """Upgrade yt-dlp inside this app's own Python environment. Returns (old, new) versions.
+
+    YouTube changes often, and an outdated yt-dlp is the usual reason downloads stop working.
+    pip is run directly (no shell) with a fixed package name, over HTTPS with verification.
+    The new version is used the next time the app starts.
+    """
+    old = installed_version()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--disable-pip-version-check",
+            "--no-input",
+            "yt-dlp[default]",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdin=subprocess.DEVNULL,
+        timeout=300,
+        creationflags=_NO_WINDOW,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
+        raise YoutubeError("Couldn't update the downloader:\n" + "\n".join(tail))
+    # Ask a fresh interpreter, since this process still has the old version loaded.
+    new = subprocess.run(
+        [sys.executable, "-c", "import importlib.metadata as m; print(m.version('yt-dlp'))"],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+        creationflags=_NO_WINDOW,
+    ).stdout.strip()
+    return old, new or "unknown"
 
 
 def _clean_error(exc: Exception) -> str:

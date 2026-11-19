@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -75,11 +74,17 @@ class LibraryPanel(QWidget):
         self.bar.setMaximumWidth(160)
         self.bar.hide()
         self._progress.changed.connect(lambda f: self.bar.setValue(int(f * 1000)))
+        self.update_button = QPushButton("Update downloader")
+        self.update_button.setToolTip(
+            "Get the latest yt-dlp. Try this if YouTube downloads stop working."
+        )
+        self.update_button.clicked.connect(self.update_downloader)
         yt_row = QHBoxLayout()
         yt_row.addWidget(self.url, 1)
         yt_row.addWidget(self.download_button)
         yt_row.addWidget(self.bar)
         yt_row.addWidget(self.cancel_button)
+        yt_row.addWidget(self.update_button)
 
         # --- actions row
         import_button = QPushButton("Import file…")
@@ -89,9 +94,10 @@ class LibraryPanel(QWidget):
         self.play_button.clicked.connect(self.play)
         stop_button = QPushButton("■ Stop")
         stop_button.clicked.connect(self.stop)
-        self.send_button = QToolButton()
-        self.send_button.setText("Send to phone…")
-        self.send_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        edit_button = QPushButton("Edit…")
+        edit_button.setToolTip("Trim, fade, and adjust volume (saves a new copy)")
+        edit_button.clicked.connect(self.edit)
+        self.send_button = QPushButton("Send to phone")
         self.send_menu = QMenu(self)
         self.send_menu.aboutToShow.connect(self._build_send_menu)
         self.send_button.setMenu(self.send_menu)
@@ -102,12 +108,18 @@ class LibraryPanel(QWidget):
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.refresh)
         actions = QHBoxLayout()
-        for w in (import_button, self.play_button, stop_button, self.send_button):
+        for w in (import_button, self.play_button, stop_button, edit_button, self.send_button):
             actions.addWidget(w)
         actions.addStretch()
         for w in (folder_button, trash_button, refresh_button):
             actions.addWidget(w)
-        self.busy_widgets = [import_button, self.download_button, trash_button, refresh_button]
+        self.busy_widgets = [
+            import_button,
+            self.download_button,
+            self.update_button,
+            trash_button,
+            refresh_button,
+        ]
 
         # --- table
         self.table = DropTable(0, 4)
@@ -214,9 +226,12 @@ class LibraryPanel(QWidget):
             finish()
             if isinstance(exc, youtube.Cancelled):
                 self.main.status("Download cancelled.")
-            else:
-                self.main.statusBar().clearMessage()
-                self.main.show_error(exc)
+                return
+            self.main.statusBar().clearMessage()
+            if isinstance(exc, youtube.YoutubeError):
+                hint = "If downloads keep failing, try “Update downloader”."
+                exc = youtube.YoutubeError(f"{exc}\n\n{hint}")
+            self.main.show_error(exc)
 
         self._run(
             lambda: youtube.download_audio(
@@ -225,6 +240,28 @@ class LibraryPanel(QWidget):
             done,
             failed,
         )
+
+    def update_downloader(self) -> None:
+        if self._busy:
+            return
+        current = youtube.installed_version()
+        question = (
+            f"Update the YouTube downloader (yt-dlp {current}) to the latest version?\n\n"
+            "This downloads it from the Python Package Index. The new version is used after "
+            "you restart the app."
+        )
+        if not message(self, "Update downloader", question, ask=True):
+            return
+        self.main.status("Updating the downloader…", 0)
+
+        def done(versions):
+            old, new = versions
+            if old == new:
+                self.main.status(f"The downloader is already up to date ({new}).")
+            else:
+                self.main.status(f"Downloader updated {old} → {new}. Restart the app to use it.", 0)
+
+        self._run(youtube.update_downloader, done)
 
     def cancel(self) -> None:
         if self._cancel is not None:
@@ -286,6 +323,19 @@ class LibraryPanel(QWidget):
             return
         panel.upload_paths([str(it.path) for it in selected])
         self.main.status(f"Sending {len(selected)} file(s) to the phone's {folder} folder…")
+
+    def edit(self) -> None:
+        from .editor_dialog import EditorDialog
+
+        selected = self._selected()
+        if not selected:
+            message(self, "Edit", "Select a sound in the list first.")
+            return
+        self.stop()
+        dialog = EditorDialog(self.main, selected[0].path, self.directory, self)
+        if dialog.exec() and dialog.saved_path is not None:
+            self.main.status(f"Saved {dialog.saved_path.name} to the library.")
+            self.refresh(select=dialog.saved_path)
 
     def open_folder(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)

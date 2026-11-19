@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Python dependencies (PySide6, yt-dlp, ...): yt-dlp in particular needs frequent updates
+  # to keep up with YouTube changes.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Versions of the GitHub Actions used in CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

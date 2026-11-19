@@ -137,3 +137,33 @@ def test_cancel_stops_the_download_hook(tmp_path):
     cancel.set()
     with pytest.raises(yt_dlp.utils.DownloadCancelled):
         hook({"status": "downloading", "downloaded_bytes": 2, "total_bytes": 10})
+
+
+def test_update_downloader_runs_pip_safely(monkeypatch):
+    import sys
+
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "2099.1.1\n", ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return Done()
+
+    monkeypatch.setattr(youtube.subprocess, "run", fake_run)
+    monkeypatch.setattr(youtube, "installed_version", lambda: "2026.1.1")
+    assert youtube.update_downloader() == ("2026.1.1", "2099.1.1")
+    pip_cmd, kwargs = calls[0]
+    assert pip_cmd[:4] == [sys.executable, "-m", "pip", "install"]  # this app's own Python
+    assert pip_cmd[-1] == "yt-dlp[default]" and "--upgrade" in pip_cmd
+    assert not kwargs.get("shell")  # argument list, never a shell string
+
+
+def test_update_downloader_reports_pip_failure(monkeypatch):
+    class Failed:
+        returncode, stdout, stderr = 1, "", "ERROR: network is unreachable"
+
+    monkeypatch.setattr(youtube.subprocess, "run", lambda *a, **k: Failed())
+    with pytest.raises(youtube.YoutubeError, match="network is unreachable"):
+        youtube.update_downloader()

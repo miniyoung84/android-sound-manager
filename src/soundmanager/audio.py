@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -124,6 +126,53 @@ def extract_best(src: Path, dst_without_suffix: Path) -> Path:
     codec_args = ["-c:a", "copy"] if copy else _encoder_args(dst)
     _ffmpeg("-i", _file_arg(src), "-vn", "-map", "0:a:0", *codec_args, _file_arg(dst))
     return dst
+
+
+def waveform_peaks(path: Path, buckets: int = 2000) -> tuple[list[float], float]:
+    """Return (peaks, duration): `buckets` loudness peaks in 0..1 across the whole file.
+
+    Audio is decoded to mono at a reduced sample rate (at most ~2 million samples, so about
+    4 MB of memory even for an hour-long file).
+    """
+    duration = probe_duration(path)
+    rate = int(max(200, min(8000, 2_000_000 / max(duration, 0.1))))
+    proc = subprocess.run(
+        [
+            find_tool("ffmpeg"),
+            "-hide_banner",
+            "-nostdin",
+            "-v",
+            "error",
+            "-i",
+            _file_arg(path),
+            "-map",
+            "0:a:0",
+            "-ac",
+            "1",
+            "-ar",
+            str(rate),
+            "-f",
+            "s16le",
+            "pipe:1",
+        ],  # fmt: skip
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW,
+    )
+    if proc.returncode != 0:
+        raise AudioError(f"Couldn't read the audio in {Path(path).name}")
+    samples = array("h")
+    samples.frombytes(proc.stdout[: len(proc.stdout) // 2 * 2])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return [], duration
+    step = max(1, len(samples) // max(1, buckets))
+    peaks = []
+    for i in range(0, len(samples), step):
+        chunk = samples[i : i + step]
+        peaks.append(max(-min(chunk), max(chunk)) / 32768)
+    return peaks, duration
 
 
 def build_filters(spec: EditSpec, clip_duration: float) -> list[str]:

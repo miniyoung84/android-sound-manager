@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -102,9 +101,7 @@ class FolderPanel(PhonePanel):
         buttons.addStretch()
 
         # Changing a default is always: open menu -> pick an entry -> confirm. Never one click.
-        self.set_button = QToolButton()
-        self.set_button.setText(f"Set as {self.sound_name}…")
-        self.set_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.set_button = QPushButton(f"Set as {self.sound_name}")
         self.set_menu = QMenu(self)
         self.set_menu.aboutToShow.connect(self._build_set_menu)
         self.set_button.setMenu(self.set_menu)
