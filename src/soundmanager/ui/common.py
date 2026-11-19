@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QMessageBox, QTableWidget, QWidget
 
 from .. import adb
+from ..audio import AudioError
 from ..tools import ToolNotFoundError
+from ..youtube import YoutubeError
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
@@ -50,7 +53,7 @@ def message(parent, title: str, text: str, ask: bool = False, icon=None) -> bool
 
 
 def error_text(exc: BaseException) -> str:
-    if isinstance(exc, (adb.AdbError, ToolNotFoundError, OSError)):
+    if isinstance(exc, (adb.AdbError, AudioError, YoutubeError, ToolNotFoundError, OSError)):
         return str(exc)
     return f"{type(exc).__name__}: {exc}"
 
@@ -60,6 +63,43 @@ def summarize(lines: list[str], limit: int = 12) -> str:
     if len(lines) > limit:
         shown.append(f"… and {len(lines) - limit} more")
     return "\n".join(shown)
+
+
+class DropTable(QTableWidget):
+    """Table that accepts local files dragged in from Explorer."""
+
+    files_dropped = Signal(list)
+
+    def __init__(self, rows: int, cols: int):
+        super().__init__(rows, cols)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDragDropMode(QTableWidget.DragDropMode.DropOnly)
+
+    @staticmethod
+    def _local_files(event) -> list[str]:
+        data = event.mimeData()
+        urls = data.urls() if data.hasUrls() else []
+        return [
+            u.toLocalFile() for u in urls if u.isLocalFile() and Path(u.toLocalFile()).is_file()
+        ]
+
+    def dragEnterEvent(self, event):
+        if self.acceptDrops() and self._local_files(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        files = self._local_files(event) if self.acceptDrops() else []
+        if files:
+            event.acceptProposedAction()
+            self.files_dropped.emit(files)
+        else:
+            event.ignore()
 
 
 class PhonePanel(QWidget):

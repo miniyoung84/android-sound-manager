@@ -98,7 +98,7 @@ def window(app, monkeypatch, tmp_path):
         "set_contact_ringtone",
         lambda dev, cid, path: contact_calls.append((cid, path)) or None,
     )
-    w = mw.MainWindow(journal=Journal(tmp_path / "journal"))
+    w = mw.MainWindow(journal=Journal(tmp_path / "journal"), library_dir=tmp_path / "lib")
     w.calls, w.contact_calls = calls, contact_calls
     assert wait_until(
         lambda: (
@@ -225,3 +225,60 @@ def test_disconnect_errors_dont_pop_dialogs(window, monkeypatch):
     assert "disconnected" in window.statusBar().currentMessage().lower()
     window.show_error(adb.AdbError("Refusing to upload outside the sound folders"))
     assert len(dialogs) == 1  # real errors still get a dialog
+
+
+# --------------------------------------------------------------------------- library tab
+
+
+def test_library_lists_and_sends_to_phone(window, tmp_path, monkeypatch):
+    lib = tmp_path / "lib"
+    lib.mkdir(exist_ok=True)
+    (lib / "chime.mp3").write_bytes(b"x")
+    panel = window.library_panel
+    panel.refresh()
+    assert wait_until(lambda: panel.table.rowCount() == 1 and not window.media_runner.busy)
+    assert panel.table.item(0, 0).text() == "chime.mp3"
+
+    panel._build_send_menu()  # nothing selected yet
+    assert not panel.send_menu.actions()[0].isEnabled()
+
+    panel.table.selectRow(0)
+    panel._build_send_menu()
+    assert [a.text() for a in panel.send_menu.actions()] == [
+        "To Ringtones",
+        "To Notifications",
+        "To Alarms",
+    ]
+    sent = []
+    target = window.folder_panel("Notifications")
+    monkeypatch.setattr(target, "upload_paths", lambda paths: sent.extend(paths))
+    panel.send_menu.actions()[1].trigger()
+    assert sent == [str(lib / "chime.mp3")]
+
+
+def test_library_send_needs_phone(window):
+    window._on_devices([])
+    window.library_panel._build_send_menu()
+    actions = window.library_panel.send_menu.actions()
+    assert len(actions) == 1 and "Connect your phone" in actions[0].text()
+
+
+def test_library_rejects_bad_links_without_downloading(window, monkeypatch):
+    shown = []
+    monkeypatch.setattr(
+        "soundmanager.ui.library_panel.message", lambda _p, _t, text, **k: shown.append(text)
+    )
+    monkeypatch.setattr(
+        "soundmanager.youtube.download_audio",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not download")),
+    )
+    window.library_panel.url.setText("file:///C:/Windows/win.ini")
+    window.library_panel.download()
+    assert shown and "http" in shown[0]
+
+
+def test_no_phone_at_startup_says_so(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(adb, "list_devices", lambda: [])
+    w = mw.MainWindow(journal=Journal(tmp_path / "j"), library_dir=tmp_path / "lib")
+    assert wait_until(lambda: "No phone found" in w.device_combo.currentText())
+    w.close()

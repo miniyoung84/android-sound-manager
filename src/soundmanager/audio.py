@@ -19,6 +19,9 @@ ENCODERS: dict[str, list[str]] = {
     ".wav": ["-c:a", "pcm_s16le"],
 }
 
+# Source codecs we can keep as-is (no quality loss) and the container to put them in.
+COPYABLE: dict[str, str] = {"aac": ".m4a", "mp3": ".mp3", "vorbis": ".ogg"}
+
 
 class AudioError(RuntimeError):
     pass
@@ -36,6 +39,15 @@ class EditSpec:
     normalize: bool = False  # EBU R128 loudness normalization
 
 
+def _file_arg(path: Path) -> str:
+    """Force ffmpeg to treat *path* as a plain local file.
+
+    Without the `file:` prefix, a name like `concat:...` or `http:...` would be interpreted as an
+    ffmpeg protocol instead of a file.
+    """
+    return "file:" + str(Path(path).resolve())
+
+
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         cmd,
@@ -43,6 +55,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.DEVNULL,
         creationflags=_NO_WINDOW,
     )
     if proc.returncode != 0:
@@ -51,23 +64,30 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return proc
 
 
-def probe_duration(path: Path) -> float:
-    out = _run(
-        [
-            find_tool("ffprobe"),
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(path),
-        ]
-    ).stdout
+def _ffmpeg(*args: str) -> None:
+    _run([find_tool("ffmpeg"), "-hide_banner", "-nostdin", "-y", *args])
+
+
+def _probe(path: Path, *args: str) -> dict:
+    out = _run([find_tool("ffprobe"), "-v", "error", *args, "-of", "json", _file_arg(path)]).stdout
     try:
-        return float(json.loads(out)["format"]["duration"])
-    except (KeyError, ValueError) as exc:
-        raise AudioError(f"No duration found for {path}") from exc
+        return json.loads(out)
+    except ValueError as exc:
+        raise AudioError(f"Couldn't read {Path(path).name}") from exc
+
+
+def probe_duration(path: Path) -> float:
+    try:
+        return float(_probe(path, "-show_entries", "format=duration")["format"]["duration"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AudioError(f"No duration found for {Path(path).name}") from exc
+
+
+def audio_codec(path: Path) -> str | None:
+    """Codec name of the first audio stream, or None if the file has no audio."""
+    streams = _probe(path, "-select_streams", "a:0", "-show_entries", "stream=codec_name")
+    streams = streams.get("streams") or []
+    return streams[0].get("codec_name") if streams else None
 
 
 def _encoder_args(dst: Path) -> list[str]:
@@ -80,21 +100,29 @@ def _encoder_args(dst: Path) -> list[str]:
 
 
 def extract_audio(src: Path, dst: Path) -> Path:
-    """Strip the audio track out of a video (or re-encode any audio file)."""
+    """Strip the audio track out of a video (or re-encode any audio file) into *dst*."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    _run(
-        [
-            find_tool("ffmpeg"),
-            "-y",
-            "-i",
-            str(src),
-            "-vn",
-            "-map",
-            "0:a:0",
-            *_encoder_args(dst),
-            str(dst),
-        ]
-    )
+    _ffmpeg("-i", _file_arg(src), "-vn", "-map", "0:a:0", *_encoder_args(dst), _file_arg(dst))
+    return dst
+
+
+def best_audio_suffix(src: Path) -> tuple[str, bool]:
+    """Pick an output container for *src*'s audio: (suffix, can_copy_without_re_encoding)."""
+    codec = audio_codec(src)
+    if codec is None:
+        raise AudioError(f"{Path(src).name} has no audio track.")
+    if codec in COPYABLE:
+        return COPYABLE[codec], True
+    return ".m4a", False
+
+
+def extract_best(src: Path, dst_without_suffix: Path) -> Path:
+    """Extract *src*'s audio, copying it untouched when the codec allows, else as AAC (.m4a)."""
+    suffix, copy = best_audio_suffix(src)
+    dst = dst_without_suffix.with_name(dst_without_suffix.name + suffix)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    codec_args = ["-c:a", "copy"] if copy else _encoder_args(dst)
+    _ffmpeg("-i", _file_arg(src), "-vn", "-map", "0:a:0", *codec_args, _file_arg(dst))
     return dst
 
 
@@ -119,22 +147,11 @@ def export(src: Path, dst: Path, spec: EditSpec) -> Path:
     if end <= spec.start:
         raise AudioError("Edit end must be after start")
 
-    cmd = [
-        find_tool("ffmpeg"),
-        "-y",
-        "-ss",
-        f"{spec.start:.3f}",
-        "-to",
-        f"{end:.3f}",
-        "-i",
-        str(src),
-        "-vn",
-        "-map",
-        "0:a:0",
-    ]
+    args = ["-ss", f"{spec.start:.3f}", "-to", f"{end:.3f}", "-i", _file_arg(src)]
+    args += ["-vn", "-map", "0:a:0"]
     filters = build_filters(spec, end - spec.start)
     if filters:
-        cmd += ["-af", ",".join(filters)]
+        args += ["-af", ",".join(filters)]
     dst.parent.mkdir(parents=True, exist_ok=True)
-    _run([*cmd, *_encoder_args(dst), str(dst)])
+    _ffmpeg(*args, *_encoder_args(dst), _file_arg(dst))
     return dst

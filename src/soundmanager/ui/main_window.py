@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
@@ -25,15 +25,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import adb, phone_sounds
+from .. import adb, library, phone_sounds
 from ..journal import Journal
 from ..tools import tool_status
-from .common import AUDIO_EXTENSIONS, PhonePanel, error_text, escape, human_size, message
+from .common import (
+    AUDIO_EXTENSIONS,
+    DropTable,
+    PhonePanel,
+    error_text,
+    escape,
+    human_size,
+    message,
+)
 from .contacts_panel import ContactsPanel
+from .library_panel import LibraryPanel
 from .tasks import TaskRunner
 
 AUDIO_FILTER = "Audio files (" + " ".join(f"*{e}" for e in AUDIO_EXTENSIONS) + ");;All files (*)"
-DEFAULT_LIBRARY = Path.home() / "Music" / "Android Sound Manager"
+DEFAULT_LIBRARY = library.DEFAULT_LIBRARY
 DEVICE_POLL_MS = 2500
 
 # Phone folder tab -> sound type in phone_sounds.SOUND_KEYS, and its human name.
@@ -54,48 +63,12 @@ def _slot_label(key: str, keys: list[str]) -> str:
 # --------------------------------------------------------------------------- widgets
 
 
-class DropTable(QTableWidget):
-    """Table that accepts local files dragged in from Explorer."""
-
-    files_dropped = Signal(list)
-
-    def __init__(self, rows: int, cols: int):
-        super().__init__(rows, cols)
-        self.setAcceptDrops(True)
-        self.viewport().setAcceptDrops(True)
-        self.setDragDropMode(QTableWidget.DragDropMode.DropOnly)
-
-    @staticmethod
-    def _local_files(event) -> list[str]:
-        data = event.mimeData()
-        urls = data.urls() if data.hasUrls() else []
-        return [
-            u.toLocalFile() for u in urls if u.isLocalFile() and Path(u.toLocalFile()).is_file()
-        ]
-
-    def dragEnterEvent(self, event):
-        if self.acceptDrops() and self._local_files(event):
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        self.dragEnterEvent(event)
-
-    def dropEvent(self, event):
-        files = self._local_files(event) if self.acceptDrops() else []
-        if files:
-            event.acceptProposedAction()
-            self.files_dropped.emit(files)
-        else:
-            event.ignore()
-
-
 class FolderPanel(PhonePanel):
     """One phone folder (e.g. /sdcard/Ringtones) shown as a table with actions."""
 
     def __init__(self, main: MainWindow, folder: str, remote_dir: str):
         super().__init__(main)
+        self.folder = folder
         self.remote_dir = remote_dir
         self.sound, self.sound_name = FOLDER_SOUND[folder]
         self.files: list[adb.RemoteFile] = []
@@ -377,7 +350,7 @@ class FolderPanel(PhonePanel):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, journal: Journal | None = None):
+    def __init__(self, journal: Journal | None = None, library_dir: Path | None = None):
         super().__init__()
         self.setWindowTitle("Android Sound Manager")
         self.resize(1080, 660)
@@ -385,10 +358,13 @@ class MainWindow(QMainWindow):
         self.names: dict[str, str] = {}  # serial -> friendly name (in memory only, never logged)
         self.journal = journal or Journal()
         self._poll_error_shown = False
+        self._devices_known = False  # becomes True after the first device poll
         self._last_disconnect_notice = 0.0
 
         self.runner = TaskRunner(self.show_error, self, name="phone")
         self.poller = TaskRunner(self._poll_failed, self, name="poll")
+        # Downloads and conversions get their own thread so they never hold up phone actions.
+        self.media_runner = TaskRunner(self.show_error, self, name="media")
 
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(360)
@@ -400,6 +376,8 @@ class MainWindow(QMainWindow):
         top.addStretch()
 
         self.tabs = QTabWidget()
+        self.library_panel = LibraryPanel(self, library_dir or library.DEFAULT_LIBRARY)
+        self.tabs.addTab(self.library_panel, "Library (PC)")
         self.panels: list[PhonePanel] = []
         for name, path in adb.SOUND_FOLDERS.items():
             panel = FolderPanel(self, name, path)
@@ -418,11 +396,13 @@ class MainWindow(QMainWindow):
         self.busy_label = QLabel("Working…")
         self.busy_label.hide()
         self.statusBar().addPermanentWidget(self.busy_label)
-        self.runner.busy_changed.connect(self.busy_label.setVisible)
+        for r in (self.runner, self.media_runner):
+            r.busy_changed.connect(self._update_busy)
 
         missing = [name for name, path in tool_status().items() if path is None]
         if missing:
             self.status("Missing tools: " + ", ".join(missing), 0)
+        self.library_panel.refresh()
 
         # Watch for phones being plugged in, unplugged, or authorized.
         self.poll_timer = QTimer(self)
@@ -435,6 +415,12 @@ class MainWindow(QMainWindow):
     @property
     def folder_panels(self) -> list[FolderPanel]:
         return [p for p in self.panels if isinstance(p, FolderPanel)]
+
+    def folder_panel(self, folder: str) -> FolderPanel | None:
+        return next((p for p in self.folder_panels if p.folder == folder), None)
+
+    def _update_busy(self, _=None) -> None:
+        self.busy_label.setVisible(self.runner.busy or self.media_runner.busy)
 
     def status(self, text: str, ms: int = 8000) -> None:
         self.statusBar().showMessage(text, ms)
@@ -483,8 +469,10 @@ class MainWindow(QMainWindow):
 
     def _on_devices(self, devices: list[adb.Device]) -> None:
         self._poll_error_shown = False
-        if [(d.serial, d.state) for d in devices] == [(d.serial, d.state) for d in self.devices]:
+        same = [(d.serial, d.state) for d in devices] == [(d.serial, d.state) for d in self.devices]
+        if same and self._devices_known:
             return
+        self._devices_known = True
         newly_ready = {d.serial for d in devices if d.ready} - {
             d.serial for d in self.devices if d.ready
         }
@@ -551,6 +539,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.poll_timer.stop()
+        self.library_panel.shutdown()  # cancels a running download
         self.runner.shutdown()
         self.poller.shutdown()
+        self.media_runner.shutdown()
         super().closeEvent(event)
