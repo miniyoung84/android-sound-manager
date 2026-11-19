@@ -1,0 +1,59 @@
+Copyright (c) 2026 Chase Choi. All rights reserved.
+
+PROPRIETARY LICENSE - SOURCE AVAILABLE FOR VIEWING ONLY
+
+This repository, including all source code, documentation, designs, images,
+audio, and any compiled or derived works (collectively, the "Software"), is the
+exclusive property of the copyright holder.
+
+The Software is publicly visible solely for the purpose of viewing. No license
+or right is granted to you, by implication, estoppel, or otherwise, except as
+expressly stated below.
+
+1. RESTRICTIONS. Without the prior written permission of the copyright holder,
+   you may NOT, in whole or in part:
+     a. use, execute, install, or run the Software;
+     b. copy, reproduce, or download the Software, except as described in
+        Section 2;
+     c. modify, adapt, translate, or create derivative works of the Software;
+     d. distribute, publish, sublicense, sell, rent, lease, lend, or otherwise
+        make the Software available to any third party;
+     e. incorporate the Software into any other software, product, or service;
+     f. use the Software, or any portion of it, to train, fine-tune, evaluate,
+        or otherwise develop any machine learning or artificial intelligence
+        model or dataset;
+     g. remove or alter any copyright, trademark, or other proprietary notice.
+
+2. GITHUB TERMS. To the extent that the GitHub Terms of Service require it,
+   users of GitHub are permitted to view and fork this repository on GitHub
+   using GitHub's functionality. That permission does not extend to any other
+   use, and any fork remains subject to every restriction in Section 1.
+
+3. THIRD-PARTY SOFTWARE. The Software interoperates with third-party tools and
+   libraries (for example Qt for Python / PySide6, yt-dlp, FFmpeg, and the
+   Android SDK Platform-Tools). Those components are not part of the Software,
+   are not distributed in this repository, and are governed solely by their
+   own licenses.
+
+4. CONTRIBUTIONS. By submitting any contribution (including pull requests,
+   patches, issues, or suggestions) to this repository, you assign to the
+   copyright holder all right, title, and interest in that contribution, or,
+   where assignment is not permitted by law, grant the copyright holder a
+   perpetual, worldwide, irrevocable, royalty-free, exclusive license to use it
+   for any purpose.
+
+5. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+6. LIMITATION OF LIABILITY. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR
+   ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE
+   OR THE USE OF OR OTHER DEALINGS IN THE SOFTWARE.
+
+7. TERMINATION. Any use of the Software in violation of this license
+   automatically terminates any permission you may have had and may result in
+   civil and criminal penalties.
+
+To request permission for any use not granted above, contact the copyright
+holder through the GitHub profile that owns this repository.

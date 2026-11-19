@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "android-sound-manager"
+version = "0.1.0"
+description = "Desktop toolkit for editing sounds and managing ringtones, notification and alarm sounds on an Android phone over ADB."
+readme = "README.md"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.15"
+authors = [{ name = "Chase Choi" }]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Sound/Audio :: Editors",
+]
+dependencies = [
+    "PySide6>=6.11,<7",
+    # [default] pulls in yt-dlp-ejs, which YouTube extraction needs (plus a JS runtime: Node or Deno).
+    "yt-dlp[default]>=2025.11.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[project.gui-scripts]
+soundmanager = "soundmanager.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+soundmanager = ["assets/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,60 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- Secrets / local config ----
+.env
+.env.*
+*.pem
+*.keystore
+*.jks
+keystore.properties
+local.properties
+.claude/settings.local.json
+
+# ---- Android / Gradle (android/ companion app) ----
+.gradle/
+android/**/build/
+android/app/release/
+android/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+
+# ---- IDEs ----
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ---- OS ----
+Thumbs.db
+desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# ---- App working data (user audio never belongs in the repo) ----
+/library/
+/downloads/
+/exports/
+/tmp/
+*.part
+*.ytdl
