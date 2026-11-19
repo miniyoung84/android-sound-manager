@@ -282,3 +282,18 @@ def test_no_phone_at_startup_says_so(app, monkeypatch, tmp_path):
     w = mw.MainWindow(journal=Journal(tmp_path / "j"), library_dir=tmp_path / "lib")
     assert wait_until(lambda: "No phone found" in w.device_combo.currentText())
     w.close()
+
+
+def test_message_sound_dialog_guides_and_opens_settings(window, monkeypatch):
+    from soundmanager import phone_settings
+
+    opened = []
+    monkeypatch.setattr(phone_settings, "open_conversation_settings", lambda dev: opened.append(1))
+    dlg = cp.MessageSoundDialog(window, "Avery Example", ["Ding Dong.ogg", "chirp.mp3"])
+    steps = dlg.steps.text()
+    assert "Avery Example" in steps and "“Ding Dong”" in steps
+    dlg.sound_combo.setCurrentIndex(1)
+    assert "“chirp”" in dlg.steps.text()
+    dlg.open_conversations()
+    assert wait_until(lambda: opened and not window.runner.busy)
+    dlg.accept()

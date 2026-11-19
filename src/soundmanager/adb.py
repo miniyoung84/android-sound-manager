@@ -154,7 +154,16 @@ def _run(args: list[str], timeout: float = 60) -> str:
         raise AdbError(f"adb timed out: {' '.join(args[:3])}") from exc
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
-        raise AdbError(detail or "The connection to the phone was interrupted.")
+        if not detail:
+            # adb itself killed or cut off reports -1 (4294967295 on Windows); anything else is
+            # just the phone-side command failing quietly.
+            interrupted = proc.returncode in (-1, 0xFFFFFFFF) or proc.returncode < 0
+            detail = (
+                "The connection to the phone was interrupted."
+                if interrupted
+                else f"A command on the phone failed (exit code {proc.returncode})."
+            )
+        raise AdbError(detail)
     return proc.stdout
 
 

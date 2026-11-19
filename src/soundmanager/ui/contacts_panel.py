@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .. import adb, phone_contacts
+from .. import adb, phone_contacts, phone_settings
 from .common import PhonePanel, message, summarize
 
 if TYPE_CHECKING:
@@ -73,12 +74,16 @@ class ContactsPanel(PhonePanel):
         self.apply_button.clicked.connect(self.apply)
         self.undo_button = QPushButton("Undo")
         self.undo_button.clicked.connect(self.undo)
+        self.message_button = QPushButton("Message sound…")
+        self.message_button.setToolTip("Set the sound for this person's text messages")
+        self.message_button.clicked.connect(self.message_sound)
 
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Ringtone:"))
         bottom.addWidget(self.sound_combo)
         bottom.addWidget(self.apply_button)
         bottom.addStretch()
+        bottom.addWidget(self.message_button)
         bottom.addWidget(self.undo_button)
 
         self.count_label = QLabel()
@@ -95,7 +100,7 @@ class ContactsPanel(PhonePanel):
         layout.addLayout(bottom)
         layout.addWidget(hint)
 
-        self.action_widgets = [refresh, self.apply_button, self.sound_combo]
+        self.action_widgets = [refresh, self.apply_button, self.sound_combo, self.message_button]
         self.set_busy(False)
 
     def has_undo(self) -> bool:
@@ -263,3 +268,114 @@ class ContactsPanel(PhonePanel):
             self.undo_changes = list(remaining)
 
         self.run(work, done, failed)
+
+    # ------------------------------------------------------------------ message sounds
+
+    def message_sound(self) -> None:
+        selected = self._selected()
+        if len(selected) != 1:
+            message(self, "Pick a contact", "Select exactly one contact first.")
+            return
+        notif = self.main.folder_panel("Notifications")
+        sounds = [f.name for f in notif.files] if notif else []
+        MessageSoundDialog(self.main, selected[0].name, sounds, self).exec()
+
+
+class MessageSoundDialog(QDialog):
+    """Guides the user through setting one conversation's sound on the phone.
+
+    Android keeps per-conversation sounds in the messaging app's notification settings and
+    doesn't let the desktop change them (on retail phones ADB can't even see which conversation
+    is which), so this opens the right screen on the phone and says exactly what to tap.
+    """
+
+    def __init__(self, main: MainWindow, contact: str, sounds: list[str], parent=None):
+        super().__init__(parent)
+        self.main = main
+        self.contact = contact
+        self.setWindowTitle("Message sound")
+        self.setMinimumWidth(560)
+
+        intro = QLabel(
+            f"Choose the sound for messages from {contact}. Android only lets you set this on "
+            "the phone itself, so this opens the right screen there and tells you what to tap."
+        )
+        intro.setTextFormat(Qt.TextFormat.PlainText)
+        intro.setWordWrap(True)
+
+        self.sound_combo = QComboBox()
+        for name in sounds:
+            self.sound_combo.addItem(name)
+        self.sound_combo.currentTextChanged.connect(self._update_steps)
+        no_sounds = QLabel(
+            "Your phone's Notifications folder is empty. Upload a sound there first "
+            "(Notifications tab, or Library → Send to phone)."
+        )
+        no_sounds.setWordWrap(True)
+        no_sounds.setVisible(not sounds)
+
+        self.steps = QLabel()
+        self.steps.setTextFormat(Qt.TextFormat.PlainText)
+        self.steps.setWordWrap(True)
+
+        self.open_button = QPushButton("Open on phone")
+        self.open_button.setDefault(True)
+        self.open_button.clicked.connect(self.open_conversations)
+        app_button = QPushButton("Open messaging app settings instead")
+        app_button.clicked.connect(self.open_app_settings)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Sound:"))
+        row.addWidget(self.sound_combo, 1)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.open_button)
+        buttons.addWidget(app_button)
+        buttons.addStretch()
+        buttons.addWidget(close)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(intro)
+        layout.addLayout(row)
+        layout.addWidget(no_sounds)
+        layout.addWidget(self.steps)
+        layout.addLayout(buttons)
+        self._update_steps()
+
+    def _sound_title(self) -> str:
+        name = self.sound_combo.currentText()
+        return name.rsplit(".", 1)[0] if "." in name else name  # pickers show the title
+
+    def _update_steps(self, *_args) -> None:
+        sound = self._sound_title() or "your sound"
+        self.steps.setText(
+            "On the phone:\n"
+            f"  1. Unlock it. The Conversations screen opens.\n"
+            f"  2. Tap {self.contact}'s conversation.\n"
+            f"  3. Tap Sound and choose “{sound}”.\n\n"
+            "Not in the list? It only shows recent conversations. Use “Open messaging app "
+            "settings instead”, or in the messaging app open the conversation, tap its "
+            "name, then Notifications → Sound."
+        )
+
+    def _run_on_phone(self, fn, done_text: str) -> None:
+        dev = self.main.device()
+        if dev is None:
+            message(self, "No phone", "Connect your phone first.")
+            return
+        self.main.runner.submit(lambda: fn(dev), lambda _: self.main.status(done_text))
+
+    def open_conversations(self) -> None:
+        self._run_on_phone(
+            phone_settings.open_conversation_settings,
+            "Opened Conversations on the phone. Unlock it to continue.",
+        )
+
+    def open_app_settings(self) -> None:
+        def work(dev):
+            phone_settings.open_app_notification_settings(
+                dev, phone_settings.default_messaging_app(dev)
+            )
+
+        self._run_on_phone(work, "Opened the messaging app's notification settings on the phone.")

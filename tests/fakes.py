@@ -30,6 +30,8 @@ class FakePhone:
         self.connected = True
         self.disconnect_after_writes: int | None = None
         self.rescanned: list[str] = []
+        self.started: list[list[str]] = []
+        self.sms_app = "com.google.android.apps.messaging"
         if samsung:
             for key in ("ringtone", "notification_sound", "alarm_alert"):
                 self.settings.setdefault(key + "_CONSTANT_PATH", "?path=%2Fsystem%2Fx.ogg")
@@ -79,6 +81,13 @@ class FakePhone:
                 return ""
             case ["am", "get-current-user"]:
                 return "0\n"
+            case ["settings", "get", "secure", "sms_default_application"]:
+                return self.sms_app + "\n"
+            case ["input", "keyevent", _]:
+                return ""
+            case ["am", "start", "--user", "current", *rest]:
+                self.started.append(rest)
+                return "Starting: Intent { ... }\n"
             case ["am", "broadcast", "-a", _, "-d", uri]:
                 self.rescanned.append(uri)
                 return "Broadcast completed: result=0\n"

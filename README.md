@@ -20,7 +20,7 @@ USB-connected Android phone, from both the desktop and the phone.
 | ✅ | Waveform editor: trim, fade, volume, loudness normalize, preview, undo/redo | Desktop |
 | ✅ | Set the default ringtone, notification, and alarm sounds (per SIM, with Undo) | Desktop |
 | ✅ | Per-contact ringtones (search, batch apply, Undo) | Desktop |
-| ⏳ | Per-contact message sounds (via the messaging app's settings) | Desktop |
+| ✅ | Per-contact message sounds (guided: desktop opens the right screen on the phone) | Desktop + phone |
 | ⏳ | One-tap jump to any app's notification category to pick its sound | Phone app |
 | ⏳ | Companion Android app with sound library and basic editing | Phone app |
 
@@ -71,8 +71,11 @@ Roughly in build order. Check items off as they land.
       (ADB already has contacts access, so no companion app needed)
 - [x] Set or clear a contact's ringtone (`custom_ringtone`), for one or many contacts, with
       confirmation and Undo
-- [ ] Per-contact message sound: put the file in `Notifications/` and open that conversation's
-      notification settings in the messaging app (Android doesn't let other apps change it directly)
+- [x] Per-contact message sound: pick a sound from `Notifications/`, then the desktop opens
+      Settings > Conversations on the phone and says exactly what to tap (Android masks
+      conversation IDs from ADB, so the final pick happens on the phone)
+- [ ] Companion app: jump straight to one conversation's sound setting (needs the conversation ID,
+      which only an on-phone notification listener can see)
 - [x] Never read phone numbers; never write contact names to logs, files, or the repo
 
 ### Milestone 3: Import
