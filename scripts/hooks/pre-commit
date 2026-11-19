@@ -18,7 +18,7 @@ report() {
     status=1
 }
 
-hits=$(printf '%s\n' "$added" | grep -E -o '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
+hits=$(printf '%s\n' "$added" | grep -E -o '[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' \
     | grep -v -i -E 'noreply|example\.(com|org|net)')
 [ -n "$hits" ] && report "email address in staged changes:" "$hits"
 

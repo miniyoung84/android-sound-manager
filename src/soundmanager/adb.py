@@ -126,6 +126,14 @@ class AdbDevice:
     def getprop(self, key: str) -> str:
         return self.shell(f"getprop {shlex.quote(key)}").strip()
 
+    def friendly_name(self) -> str:
+        """The name the user gave the phone (Settings > About phone), else its marketing name."""
+        for cmd in ("settings get global device_name", "getprop ro.product.marketname"):
+            value = self.shell(cmd).strip()
+            if value and value != "null":
+                return value[:64]
+        return ""
+
     def list_dir(self, remote_dir: str) -> list[RemoteFile]:
         d = shlex.quote(remote_dir)
         out = self.shell(

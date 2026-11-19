@@ -18,7 +18,7 @@ USB-connected Android phone, from both the desktop and the phone.
 | 🧩 | Trim, fade, change gain, and normalize loudness (core code ready, no UI yet) | Desktop |
 | ⏳ | Waveform editor with preview playback | Desktop |
 | ✅ | Set the default ringtone, notification, and alarm sounds (per SIM, with Undo) | Desktop |
-| ⏳ | Per-contact ringtones | Phone app |
+| ⏳ | Per-contact ringtones | Desktop + phone app |
 | ⏳ | One-tap jump to any app's notification category to pick its sound | Phone app |
 | ⏳ | Companion Android app with sound library and basic editing | Phone app |
 
@@ -43,35 +43,43 @@ Roughly in build order. Check items off as they land.
 - [x] Set a phone sound as the default ringtone, notification, or alarm from the desktop
       (per SIM on dual-SIM phones, with Undo)
 - [x] Show which sound is currently the default in each tab
-- [ ] Drag and drop files from Explorer onto a tab to upload them
-- [ ] Run ADB calls in a background thread so the UI never freezes
-- [ ] Auto-detect the phone being plugged in or unplugged (poll `adb devices` or use `adb track-devices`)
-- [ ] Friendly device name (e.g. "Galaxy Z Fold7" instead of "SM F966U1")
+- [x] Changing a default takes a menu pick plus a confirmation (no accidental one-click changes)
+- [x] Drag and drop files from Explorer onto a tab to upload them (asks before replacing)
+- [x] Run ADB calls in a background thread so the UI never freezes
+- [x] Auto-detect the phone being plugged in, unplugged, or authorized
+- [x] Show the phone's own name (Settings > About phone) instead of its model code
 
-### Milestone 2: Import
+### Milestone 2: Contacts
+- [ ] Contacts tab: search contacts and show each one's custom ringtone
+      (ADB already has contacts access, so no companion app needed)
+- [ ] Set or clear a contact's ringtone (`custom_ringtone`), with confirmation and Undo
+- [ ] Per-contact message sound: put the file in `Notifications/` and open that conversation's
+      notification settings in the messaging app (Android doesn't let other apps change it directly)
+- [ ] Never write contact names or numbers to logs, files, or the repo
+
+### Milestone 3: Import
 - [ ] Import tab: paste a YouTube URL and download the audio, with a progress bar
 - [ ] Import from a local video file (extract audio)
 - [ ] Local library folder (`%USERPROFILE%\Music\Android Sound Manager`) shown as its own tab
 - [ ] Keep yt-dlp up to date (in-app "check for updates" via pip)
 
-### Milestone 3: Editor
+### Milestone 4: Editor
 - [ ] Waveform view with draggable start/end markers
 - [ ] Preview playback of the selected region (QtMultimedia)
 - [ ] Fade in/out, gain, and loudness-normalize controls
 - [ ] Export to `.ogg` / `.mp3` / `.m4a` and "Send to phone as ringtone / notification / alarm"
 - [ ] Undo/redo for edits
 
-### Milestone 4: Android companion app
+### Milestone 5: Android companion app
 - [ ] Create the Kotlin + Jetpack Compose project in `android/` (requires Android Studio)
 - [ ] Sound library screen with a two-pane layout for the Fold's inner screen
 - [ ] Set default ringtone / notification / alarm (`WRITE_SETTINGS` special access)
-- [ ] Per-contact ringtones (`ContactsContract.Contacts.CUSTOM_RINGTONE`)
+- [ ] Per-contact ringtones on the phone itself (`ContactsContract.Contacts.CUSTOM_RINGTONE`)
 - [ ] List installed apps' notification categories and deep-link to each one's sound setting
 - [ ] Basic on-phone trimming (Media3 Transformer)
 - [ ] Local socket server so the desktop can drive it via `adb forward`
 
-### Milestone 5: Desktop + phone together
-- [ ] Desktop: assign a sound to a contact (through the companion app)
+### Milestone 6: Desktop + phone together
 - [ ] Desktop: assign a sound to an app's notification category (copy file, then open that settings page on the phone)
 - [ ] Install or update the companion APK from the desktop (`adb install`)
 - [ ] Wireless ADB pairing as an alternative to USB
