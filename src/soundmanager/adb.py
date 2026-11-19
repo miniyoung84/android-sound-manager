@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -21,6 +22,14 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 class AdbError(RuntimeError):
     pass
+
+
+def is_in_sound_folder(remote: str) -> bool:
+    """True only for a file directly inside one of SOUND_FOLDERS (no `..` tricks, no subdirs)."""
+    if "\x00" in remote or "\n" in remote:
+        return False
+    normalized = posixpath.normpath(remote)
+    return normalized == remote and posixpath.dirname(normalized) in SOUND_FOLDERS.values()
 
 
 @dataclass(frozen=True)
@@ -125,8 +134,10 @@ class AdbDevice:
         return parse_stat_listing(out)
 
     def push(self, local: Path, remote_dir: str) -> str:
-        self.shell(f"mkdir -p {shlex.quote(remote_dir)}")
         remote = str(PurePosixPath(remote_dir) / local.name)
+        if not is_in_sound_folder(remote):
+            raise AdbError(f"Refusing to upload outside the sound folders: {remote}")
+        self.shell(f"mkdir -p {shlex.quote(remote_dir)}")
         self._adb("push", str(local), remote, timeout=600)
         return remote
 
@@ -137,6 +148,6 @@ class AdbDevice:
         return dest
 
     def delete(self, remote: str) -> None:
-        if not any(remote.startswith(f + "/") for f in SOUND_FOLDERS.values()):
+        if not is_in_sound_folder(remote):
             raise AdbError(f"Refusing to delete outside the sound folders: {remote}")
         self.shell(f"rm -f {shlex.quote(remote)}")

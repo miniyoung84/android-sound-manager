@@ -29,6 +29,16 @@ $venvPy = Join-Path $root '.venv\Scripts\python.exe'
 & $venvPy -m pip install -e '.[dev]' --quiet
 Write-Host 'Python dependencies installed.' -ForegroundColor Green
 
+# Pre-commit hook that blocks private data from being committed to this public repo.
+git config core.hooksPath scripts/hooks
+if (-not (Test-Path '.private-patterns')) {
+    Set-Content -Path '.private-patterns' -Encoding ascii -Value @(
+        '# Local only (gitignored). One case-insensitive regex per line.',
+        '# Add your email, device serial, contact names, etc. The pre-commit hook blocks matches.'
+    )
+}
+Write-Host 'Pre-commit privacy hook enabled (edit .private-patterns to add your own terms).'
+
 Write-Host "`nExternal tools:"
 & $venvPy -m soundmanager.tools
 

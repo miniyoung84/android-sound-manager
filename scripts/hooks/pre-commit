@@ -1,0 +1,41 @@
+#!/bin/sh
+# Blocks commits that would publish private data in this public repo.
+#
+# 1. Generic checks: email addresses (other than noreply), private keys, common token formats.
+# 2. Personal checks: every regex in .private-patterns (gitignored, one per line, # comments ok),
+#    e.g. your email, device serial, or the names of sounds on your phone.
+#
+# Enabled by scripts/setup.ps1 (git config core.hooksPath scripts/hooks).
+# Bypass only if you are certain: git commit --no-verify
+
+added=$(git diff --cached -U0 --no-color --diff-filter=ACMR | grep '^+' | grep -v '^+++')
+files=$(git diff --cached --name-only --diff-filter=ACMR)
+status=0
+
+report() {
+    echo "pre-commit: $1" >&2
+    echo "$2" | head -n 10 | sed 's/^/    /' >&2
+    status=1
+}
+
+hits=$(printf '%s\n' "$added" | grep -E -o '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
+    | grep -v -i -E 'noreply|example\.(com|org|net)')
+[ -n "$hits" ] && report "email address in staged changes:" "$hits"
+
+hits=$(printf '%s\n' "$added" | grep -E -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+    -e 'gh[pousr]_[A-Za-z0-9]{36,}' -e 'AKIA[0-9A-Z]{16}' -e 'sk-[A-Za-z0-9_-]{20,}' \
+    -e 'AIza[0-9A-Za-z_-]{35}')
+[ -n "$hits" ] && report "possible secret or token in staged changes:" "$hits"
+
+if [ -f .private-patterns ]; then
+    pats=$(mktemp)
+    grep -v -E '^[[:space:]]*(#|$)' .private-patterns > "$pats"
+    if [ -s "$pats" ]; then
+        hits=$( (printf '%s\n' "$added"; printf '%s\n' "$files") | grep -i -E -f "$pats")
+        [ -n "$hits" ] && report "matches .private-patterns:" "$hits"
+    fi
+    rm -f "$pats"
+fi
+
+[ $status -ne 0 ] && echo "pre-commit: commit blocked. Remove the data above, then commit again." >&2
+exit $status

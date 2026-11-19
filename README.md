@@ -3,8 +3,9 @@
 Edit sounds on your PC and manage the ringtones, notification sounds, and alarm sounds on a
 USB-connected Android phone, from both the desktop and the phone.
 
-> **Status:** early development. The desktop app can already detect a phone and browse,
-> upload, download, and delete files in its sound folders. Everything else below is planned.
+> **Status:** early development. The desktop app can detect a phone, manage the files in its
+> sound folders, and set the default ringtone, notification, and alarm sounds. Everything else
+> below is planned.
 
 ## Features
 
@@ -16,7 +17,7 @@ USB-connected Android phone, from both the desktop and the phone.
 | 🧩 | Download audio from YouTube (yt-dlp; core code ready, no UI yet) | Desktop |
 | 🧩 | Trim, fade, change gain, and normalize loudness (core code ready, no UI yet) | Desktop |
 | ⏳ | Waveform editor with preview playback | Desktop |
-| ⏳ | Set the default ringtone, notification, and alarm sounds | Desktop + phone |
+| ✅ | Set the default ringtone, notification, and alarm sounds (per SIM, with Undo) | Desktop |
 | ⏳ | Per-contact ringtones | Phone app |
 | ⏳ | One-tap jump to any app's notification category to pick its sound | Phone app |
 | ⏳ | Companion Android app with sound library and basic editing | Phone app |
@@ -39,9 +40,9 @@ Roughly in build order. Check items off as they land.
 - [x] Detect the phone over ADB and show its state (ready / unauthorized)
 - [x] Browse, upload, download, and delete files in `Ringtones/`, `Notifications/`, `Alarms/`
 - [x] Desktop and Start Menu shortcuts with an app icon
-- [ ] Set a phone sound as the default ringtone, notification, or alarm from the desktop
-      (look up its MediaStore ID, then `settings put system ringtone|notification_sound|alarm_alert`)
-- [ ] Show which sound is currently the default in each tab
+- [x] Set a phone sound as the default ringtone, notification, or alarm from the desktop
+      (per SIM on dual-SIM phones, with Undo)
+- [x] Show which sound is currently the default in each tab
 - [ ] Drag and drop files from Explorer onto a tab to upload them
 - [ ] Run ADB calls in a background thread so the UI never freezes
 - [ ] Auto-detect the phone being plugged in or unplugged (poll `adb devices` or use `adb track-devices`)
@@ -80,7 +81,7 @@ Roughly in build order. Check items off as they land.
       loophole) for setting other apps' notification sounds directly
 - [ ] Standalone `.exe` build with PyInstaller for sharing
 - [ ] Back up and restore all custom sounds and assignments
-- [ ] CI: lint and tests on GitHub Actions
+- [ ] CI: lint, tests, and secret scanning on GitHub Actions
 
 ## Requirements
 
@@ -140,6 +141,7 @@ example `SOUNDMANAGER_ADB`, `SOUNDMANAGER_FFMPEG`, `SOUNDMANAGER_FFPROBE`, or `S
 ```
 src/soundmanager/
   adb.py          Device discovery and file transfer over ADB
+  phone_sounds.py Read and set default ringtone / notification / alarm sounds
   audio.py        ffmpeg-based extraction and editing
   youtube.py      yt-dlp audio downloads
   tools.py        Locates adb / ffmpeg / ffprobe / node
