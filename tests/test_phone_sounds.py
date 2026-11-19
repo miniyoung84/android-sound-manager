@@ -196,3 +196,12 @@ def test_tampered_journal_is_ignored(journal):
     assert ps.recover_pending(phone, journal) is None
     assert "adb_enabled" not in phone.settings
     assert journal.load(phone.serial) is None
+
+
+def test_repair_titles_rescans_only_stale_visible_sounds():
+    stale = ps.MediaItem(50, ".3e6484e6cbef", "/storage/emulated/0/Notifications/chime.m4a")
+    hidden = ps.MediaItem(51, ".x", "/storage/emulated/0/Notifications/.x.asm-part")
+    fine = ps.MediaItem(52, "ok", "/storage/emulated/0/Notifications/ok.m4a")
+    phone = FakePhone(media=[stale, hidden, fine, TONE])
+    assert ps.repair_titles(phone) == 1
+    assert phone.rescanned == ["file:///storage/emulated/0/Notifications/chime.m4a"]

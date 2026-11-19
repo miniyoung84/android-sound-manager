@@ -7,7 +7,7 @@ import shlex
 
 from soundmanager import phone_contacts as pc
 from soundmanager import phone_sounds as ps
-from soundmanager.adb import AdbError
+from soundmanager.adb import AdbDevice, AdbError
 
 
 class FakePhone:
@@ -18,6 +18,7 @@ class FakePhone:
     """
 
     serial = "FAKE1"
+    rescan = AdbDevice.rescan  # real method, running against this fake shell
 
     def __init__(self, settings=None, media=None, samsung=True, contacts=None, internal=None):
         self.settings = dict(settings or {})
@@ -28,6 +29,7 @@ class FakePhone:
         self.reject_writes = False
         self.connected = True
         self.disconnect_after_writes: int | None = None
+        self.rescanned: list[str] = []
         if samsung:
             for key in ("ringtone", "notification_sound", "alarm_alert"):
                 self.settings.setdefault(key + "_CONSTANT_PATH", "?path=%2Fsystem%2Fx.ogg")
@@ -77,6 +79,9 @@ class FakePhone:
                 return ""
             case ["am", "get-current-user"]:
                 return "0\n"
+            case ["am", "broadcast", "-a", _, "-d", uri]:
+                self.rescanned.append(uri)
+                return "Broadcast completed: result=0\n"
             case ["content", "query", "--uri", uri, "--projection", _, *rest]:
                 if uri.startswith(pc.CONTACTS_URI):
                     return self._query_contacts(uri)
@@ -100,6 +105,8 @@ class FakePhone:
             if m := re.fullmatch(r"_data='(.*)'", where, re.S):
                 want = m.group(1).replace("''", "'")
                 rows = [r for r in rows if r.path == want]
+            elif m := re.fullmatch(r"_data LIKE '(.*)%' AND title LIKE '\.%'", where):
+                rows = [r for r in rows if r.path.startswith(m.group(1)) and r.title[:1] == "."]
             elif m := re.fullmatch(r"_id IN \(([\d,]+)\)", where):
                 ids = {int(x) for x in m.group(1).split(",")}
                 rows = [r for r in rows if r.id in ids]

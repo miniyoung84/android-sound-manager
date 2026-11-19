@@ -11,6 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 from .tools import find_tool
 
@@ -24,6 +25,16 @@ SOUND_FOLDERS: dict[str, str] = {
 # Uploads land under a hidden temporary name first and are renamed into place only once the
 # whole file has arrived, so an unplugged cable never leaves a half-written sound behind.
 PARTIAL_SUFFIX = ".asm-part"
+
+STORAGE_ROOT = "/storage/emulated/0"
+
+
+def to_storage_path(remote: str) -> str:
+    """/sdcard/... -> /storage/emulated/0/... (the form MediaStore uses in _data)."""
+    if remote.startswith("/sdcard/"):
+        return STORAGE_ROOT + remote[len("/sdcard") :]
+    return remote
+
 
 # adb error text that means the phone went away (unplugged, rebooted, USB debugging revoked).
 _DISCONNECT_MARKERS = (
@@ -237,7 +248,19 @@ class AdbDevice:
             with contextlib.suppress(AdbError):  # best effort: the phone may already be gone
                 self.shell(f"rm -f {shlex.quote(temp)}", timeout=10)
             raise
+        # Android catalogued the file under its temp name; rescan so pickers show the real title.
+        # If this fails (disconnect), phone_sounds.repair_titles() fixes it on the next connect.
+        with contextlib.suppress(AdbError):
+            self.rescan(remote)
         return remote
+
+    def rescan(self, remote: str) -> None:
+        """Ask Android's media scanner to re-read *remote* (updates its title in sound pickers)."""
+        uri = "file://" + quote(to_storage_path(remote), safe="/")
+        self.shell(
+            f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d {shlex.quote(uri)}",
+            timeout=20,
+        )
 
     def pull(self, remote: str, local_dir: Path) -> Path:
         """Download *remote* into *local_dir*, never overwriting or leaving a partial file."""

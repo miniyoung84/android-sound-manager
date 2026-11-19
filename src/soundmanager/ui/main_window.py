@@ -513,6 +513,7 @@ class MainWindow(QMainWindow):
 
         def work():
             dev.cleanup_partial_uploads()
+            phone_sounds.repair_titles(dev)
             return phone_sounds.recover_pending(dev, journal)
 
         def done(note):

@@ -21,7 +21,14 @@ import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, quote, urlsplit
 
-from .adb import AdbDevice, AdbError, is_in_sound_folder
+from .adb import (
+    SOUND_FOLDERS,
+    STORAGE_ROOT,
+    AdbDevice,
+    AdbError,
+    is_in_sound_folder,
+    to_storage_path,
+)
 from .journal import Journal
 
 # Standard Settings.System keys per sound type (index 0 = SIM 1 / only SIM).
@@ -33,7 +40,6 @@ SOUND_KEYS: dict[str, tuple[str, ...]] = {
 ALLOWED_KEYS = frozenset(k for keys in SOUND_KEYS.values() for k in keys)
 COMPANION_SUFFIXES = ("_CONSTANT_PATH", "_set")
 
-STORAGE_ROOT = "/storage/emulated/0"
 MEDIA_URI = "content://media/external/audio/media"
 _ROW = re.compile(r"^Row: \d+ _id=(\d+), title=(.*), _data=(.*)$")
 
@@ -54,13 +60,6 @@ class DefaultSound:
 
 
 # ---------------------------------------------------------------------------- pure helpers
-
-
-def to_storage_path(remote: str) -> str:
-    """/sdcard/... -> /storage/emulated/0/... (the form MediaStore uses in _data)."""
-    if remote.startswith("/sdcard/"):
-        return STORAGE_ROOT + remote[len("/sdcard") :]
-    return remote
 
 
 def sql_quote(value: str) -> str:
@@ -220,6 +219,29 @@ def _apply_journaled(dev: AdbDevice, new: Snapshot, journal: Journal | None) -> 
     if journal is not None:
         journal.clear(dev.serial)
     return old
+
+
+def repair_titles(dev: AdbDevice) -> int:
+    """Rescan sounds whose catalogue title is still a hidden temp-file name. Returns the count.
+
+    Uploads are renamed from a hidden temp file; normally they are rescanned right away, but a
+    disconnect at exactly that moment could leave a title like ".3e6484e6cbef" in sound pickers.
+    """
+    fixed = 0
+    for folder in SOUND_FOLDERS.values():
+        prefix = to_storage_path(folder) + "/"
+        where = f"_data LIKE {sql_quote(prefix + '%')} AND title LIKE '.%'"
+        out = dev.shell(
+            f"content query --uri {MEDIA_URI} --projection _id:title:_data "
+            f"--where {shlex.quote(where)}"
+        )
+        for row in parse_media_rows(out):
+            name = row.path.rsplit("/", 1)[-1]
+            remote = row.path.replace(STORAGE_ROOT, "/sdcard", 1)
+            if not name.startswith(".") and is_in_sound_folder(remote):
+                dev.rescan(remote)
+                fixed += 1
+    return fixed
 
 
 def recover_pending(dev: AdbDevice, journal: Journal) -> str | None:

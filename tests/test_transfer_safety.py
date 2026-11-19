@@ -16,6 +16,7 @@ class FakeTransport(adb.AdbDevice):
         self.files: dict[str, bytes] = dict(files or {})
         self.fail_on: str | None = None  # "push", "pull", "mv" -> simulate a disconnect there
         self.truncate_push = False
+        self.rescanned: list[str] = []
 
     def _gone(self):
         return adb.AdbError("adb: device 'FAKE1' not found")
@@ -51,6 +52,11 @@ class FakeTransport(adb.AdbDevice):
                 raise self._gone()
             self.files[argv[3]] = self.files.pop(argv[2])
             return ""
+        if argv[:2] == ["am", "broadcast"]:
+            if self.fail_on:
+                raise self._gone()
+            self.rescanned.append(argv[-1])
+            return "Broadcast completed: result=0"
         if argv[0] == "rm":
             if self.fail_on:
                 raise self._gone()  # still disconnected: cleanup can't happen yet
@@ -73,6 +79,18 @@ def test_upload_success_replaces_atomically(song):
     phone = FakeTransport({FINAL: b"old"})
     phone.push(song, "/sdcard/Ringtones")
     assert phone.files == {FINAL: song.read_bytes()}  # no temp file left
+    # Android is told to re-read the final file so pickers show its real name, not the temp one.
+    assert phone.rescanned == ["file:///storage/emulated/0/Ringtones/tone.mp3"]
+
+
+def test_rescan_uri_encodes_awkward_names(tmp_path):
+    odd = tmp_path / "Tone #1 50% (v2).mp3"
+    odd.write_bytes(b"x")
+    phone = FakeTransport()
+    phone.push(odd, "/sdcard/Ringtones")
+    assert phone.rescanned == [
+        "file:///storage/emulated/0/Ringtones/Tone%20%231%2050%25%20%28v2%29.mp3"
+    ]
 
 
 @pytest.mark.parametrize("where", ["push", "mv"])
