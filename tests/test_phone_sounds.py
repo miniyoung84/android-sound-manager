@@ -1,62 +1,11 @@
 """Tests for phone_sounds using an in-memory fake phone (never touches a real device)."""
 
-import re
-import shlex
-
 import pytest
+from fakes import TONE, FakePhone
 
 from soundmanager import phone_sounds as ps
 from soundmanager.adb import AdbError, is_in_sound_folder
-
-
-class FakePhone:
-    """Simulates `settings`, `content query`, and `am get-current-user` over adb shell."""
-
-    def __init__(self, settings=None, media=None, samsung=True):
-        self.settings = dict(settings or {})
-        self.media = list(media or [])  # MediaItem list
-        self.commands: list[list[str]] = []
-        self.reject_writes = False
-        if samsung:
-            for key in ("ringtone", "notification_sound", "alarm_alert"):
-                self.settings.setdefault(key + "_CONSTANT_PATH", "?path=%2Fsystem%2Fx.ogg")
-                self.settings.setdefault(key + "_set", "1")
-
-    def shell(self, command: str, timeout: float = 60) -> str:
-        argv = shlex.split(command)  # what the phone's sh would see
-        self.commands.append(argv)
-        match argv:
-            case ["settings", "get", "system", key]:
-                return self.settings.get(key, "null") + "\n"
-            case ["settings", "put", "system", key, value]:
-                if not self.reject_writes:
-                    self.settings[key] = value
-                return ""
-            case ["settings", "delete", "system", key]:
-                self.settings.pop(key, None)
-                return ""
-            case ["am", "get-current-user"]:
-                return "0\n"
-            case ["content", "query", "--uri", uri, "--projection", _, *rest]:
-                return self._query(uri, rest)
-        raise AssertionError(f"unexpected command: {argv}")
-
-    def _query(self, uri, rest):
-        rows = self.media
-        if m := re.search(r"/media/(\d+)$", uri):
-            rows = [r for r in rows if r.id == int(m.group(1))]
-        if rest[:1] == ["--where"]:
-            want = re.fullmatch(r"_data='(.*)'", rest[1], re.S).group(1).replace("''", "'")
-            rows = [r for r in rows if r.path == want]
-        if not rows:
-            return "No result found.\n"
-        return "".join(
-            f"Row: {i} _id={r.id}, title={r.title}, _data={r.path}\n" for i, r in enumerate(rows)
-        )
-
-
-TONE = ps.MediaItem(42, "My Tone, v2", "/storage/emulated/0/Ringtones/My Tone, v2.mp3")
-
+from soundmanager.journal import Journal
 
 # --------------------------------------------------------------------------- pure helpers
 
@@ -166,3 +115,84 @@ def test_available_keys_includes_sim2_only_when_present():
     assert ps.available_keys(FakePhone(), "ringtone") == ["ringtone"]
     dual = FakePhone(settings={"ringtone_2": "content://x"})
     assert ps.available_keys(dual, "ringtone") == ["ringtone", "ringtone_2"]
+
+
+# --------------------------------------------------------------------------- disconnects
+
+
+@pytest.fixture
+def journal(tmp_path):
+    return Journal(tmp_path / "journal")
+
+
+def samsung_keys(phone):
+    return {
+        k: phone.settings.get(k) for k in ("ringtone", "ringtone_CONSTANT_PATH", "ringtone_set")
+    }
+
+
+def test_disconnect_mid_write_is_rolled_back_on_reconnect(journal):
+    phone = FakePhone(settings={"ringtone": "content://old"}, media=[TONE])
+    before = samsung_keys(phone)
+    phone.disconnect_after_writes = 1  # cable pulled after the first of three writes
+
+    with pytest.raises(AdbError):
+        ps.set_default(phone, "ringtone", "/sdcard/Ringtones/My Tone, v2.mp3", journal)
+    assert samsung_keys(phone) != before  # genuinely half-applied on the "phone"
+    assert journal.load(phone.serial) is not None  # ...and remembered on the PC
+
+    phone.reconnect()
+    note = ps.recover_pending(phone, journal)
+    assert note and "rolled back" in note
+    assert samsung_keys(phone) == before
+    assert journal.load(phone.serial) is None
+
+
+def test_disconnect_after_all_writes_keeps_the_completed_change(journal):
+    phone = FakePhone(settings={"ringtone": "content://old"}, media=[TONE])
+    phone.disconnect_after_writes = 3  # every write landed, then the cable went
+    with pytest.raises(AdbError):
+        ps.set_default(phone, "ringtone", "/sdcard/Ringtones/My Tone, v2.mp3", journal)
+    phone.reconnect()
+    done = samsung_keys(phone)
+    assert ps.recover_pending(phone, journal) is None  # complete: nothing to repair
+    assert samsung_keys(phone) == done
+    assert done["ringtone"].startswith("content://0@media/external/audio/media/42")
+
+
+def test_disconnect_before_any_write_changes_nothing(journal):
+    phone = FakePhone(settings={"ringtone": "content://old"}, media=[TONE])
+    before = samsung_keys(phone)
+    phone.connected = False
+    with pytest.raises(AdbError):
+        ps.set_default(phone, "ringtone", "/sdcard/Ringtones/My Tone, v2.mp3", journal)
+    phone.reconnect()
+    assert ps.recover_pending(phone, journal) is None
+    assert samsung_keys(phone) == before
+
+
+def test_successful_change_leaves_no_journal(journal):
+    phone = FakePhone(settings={"ringtone": "content://old"}, media=[TONE])
+    snapshot = ps.set_default(phone, "ringtone", "/sdcard/Ringtones/My Tone, v2.mp3", journal)
+    assert journal.load(phone.serial) is None
+    ps.restore(phone, snapshot, journal)
+    assert phone.settings["ringtone"] == "content://old"
+    assert journal.load(phone.serial) is None
+
+
+def test_writes_go_out_as_one_command():
+    phone = FakePhone(settings={"ringtone": "content://old"}, media=[TONE])
+    sent = []
+    real_shell = phone.shell
+    phone.shell = lambda cmd, timeout=60: sent.append(cmd) or real_shell(cmd)
+    ps.set_default(phone, "ringtone", "/sdcard/Ringtones/My Tone, v2.mp3")
+    writes = [c for c in sent if "settings put" in c]
+    assert len(writes) == 1 and writes[0].count("settings put") == 3
+
+
+def test_tampered_journal_is_ignored(journal):
+    phone = FakePhone(settings={"ringtone": "content://old"})
+    journal.save(phone.serial, {"kind": "settings", "old": {"adb_enabled": "0"}, "new": {}})
+    assert ps.recover_pending(phone, journal) is None
+    assert "adb_enabled" not in phone.settings
+    assert journal.load(phone.serial) is None

@@ -9,7 +9,9 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from soundmanager import adb, phone_sounds  # noqa: E402
+from soundmanager import adb, phone_contacts, phone_sounds  # noqa: E402
+from soundmanager.journal import Journal  # noqa: E402
+from soundmanager.ui import contacts_panel as cp  # noqa: E402
 from soundmanager.ui import main_window as mw  # noqa: E402
 from soundmanager.ui.tasks import TaskRunner  # noqa: E402
 
@@ -51,10 +53,15 @@ def test_runner_delivers_results_on_ui_thread(app):
 # --------------------------------------------------------------------------- main window
 
 FILE = adb.RemoteFile("/sdcard/Ringtones/tone.mp3", 1000, 1_700_000_000)
+CONTACTS = [
+    phone_contacts.Contact(1, "Avery Example", True, None),
+    phone_contacts.Contact(2, "Blake Sample", True, "content://media/external/audio/media/1"),
+    phone_contacts.Contact(3, "Front Desk Org", False, None),
+]
 
 
 @pytest.fixture
-def window(app, monkeypatch):
+def window(app, monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(adb, "list_devices", lambda: [adb.Device("FAKE1", "device", "SM_X1")])
     monkeypatch.setattr(adb.AdbDevice, "friendly_name", lambda self: "Test Phone")
@@ -74,14 +81,32 @@ def window(app, monkeypatch):
         lambda dev, k: phone_sounds.DefaultSound(k, "content://x", "Old", None),
     )
 
-    def fake_set(dev, key, path):
+    def fake_set(dev, key, path, journal=None):
         calls.append((key, path))
         return {key: "content://x"}
 
     monkeypatch.setattr(phone_sounds, "set_default", fake_set)
-    w = mw.MainWindow()
-    w.calls = calls
-    assert wait_until(lambda: w.panels[0].table.rowCount() == 1 and not w.runner.busy)
+    monkeypatch.setattr(phone_sounds, "recover_pending", lambda dev, journal: None)
+    monkeypatch.setattr(adb.AdbDevice, "cleanup_partial_uploads", lambda self: None)
+    monkeypatch.setattr(phone_contacts, "list_contacts", lambda dev: list(CONTACTS))
+    monkeypatch.setattr(
+        phone_contacts, "describe_ringtones", lambda dev, uris: {u: "tone.mp3" for u in uris}
+    )
+    contact_calls = []
+    monkeypatch.setattr(
+        phone_contacts,
+        "set_contact_ringtone",
+        lambda dev, cid, path: contact_calls.append((cid, path)) or None,
+    )
+    w = mw.MainWindow(journal=Journal(tmp_path / "journal"))
+    w.calls, w.contact_calls = calls, contact_calls
+    assert wait_until(
+        lambda: (
+            w.panels[0].table.rowCount() == 1
+            and w.contacts_panel.table.rowCount() == len(CONTACTS)
+            and not w.runner.busy
+        )
+    )
     yield w
     w.close()
 
@@ -150,3 +175,53 @@ def test_upload_rejects_non_audio_and_confirms_overwrite(window, monkeypatch, tm
     QCoreApplication.processEvents()
     assert prompts == ["Not audio", "Replace files?"]
     assert pushed == []  # user declined the overwrite
+
+
+# --------------------------------------------------------------------------- contacts tab
+
+
+def visible_names(panel):
+    return [
+        panel.table.item(r, 0).text()
+        for r in range(panel.table.rowCount())
+        if not panel.table.isRowHidden(r)
+    ]
+
+
+def test_contacts_tab_filters(window):
+    panel = window.contacts_panel
+    assert visible_names(panel) == ["Avery Example", "Blake Sample"]  # hides no-number contact
+    panel.only_custom.setChecked(True)
+    assert visible_names(panel) == ["Blake Sample"]
+    panel.only_custom.setChecked(False)
+    panel.search.setText("aver")
+    assert visible_names(panel) == ["Avery Example"]
+    assert panel.table.item(1, 1).text() == "♪ tone.mp3"
+
+
+def test_contact_change_needs_confirmation(window, monkeypatch):
+    panel = window.contacts_panel
+    panel.table.selectRow(0)
+    panel.sound_combo.setCurrentIndex(panel.sound_combo.findText("tone.mp3"))
+
+    monkeypatch.setattr(cp, "message", lambda *a, **k: False)
+    panel.apply()
+    QCoreApplication.processEvents()
+    assert window.contact_calls == []
+
+    monkeypatch.setattr(cp, "message", lambda *a, **k: True)
+    panel.apply()
+    assert wait_until(lambda: window.contact_calls and not window.runner.busy)
+    assert window.contact_calls == [(1, FILE.path)]
+    assert wait_until(lambda: panel.undo_button.isEnabled())
+
+
+def test_disconnect_errors_dont_pop_dialogs(window, monkeypatch):
+    dialogs = []
+    monkeypatch.setattr(mw, "_message", lambda *a, **k: dialogs.append(a) or False)
+    for _ in range(3):  # several queued tasks failing at once
+        window.show_error(adb.AdbError("adb: device 'FAKE1' not found"))
+    assert dialogs == []
+    assert "disconnected" in window.statusBar().currentMessage().lower()
+    window.show_error(adb.AdbError("Refusing to upload outside the sound folders"))
+    assert len(dialogs) == 1  # real errors still get a dialog

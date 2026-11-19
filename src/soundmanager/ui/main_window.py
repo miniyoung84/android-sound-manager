@@ -1,7 +1,8 @@
-"""Main desktop window: pick a connected phone and manage its sound folders."""
+"""Main desktop window: pick a connected phone and manage its sounds and contact ringtones."""
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -25,10 +26,12 @@ from PySide6.QtWidgets import (
 )
 
 from .. import adb, phone_sounds
-from ..tools import ToolNotFoundError, tool_status
+from ..journal import Journal
+from ..tools import tool_status
+from .common import AUDIO_EXTENSIONS, PhonePanel, error_text, escape, human_size, message
+from .contacts_panel import ContactsPanel
 from .tasks import TaskRunner
 
-AUDIO_EXTENSIONS = (".mp3", ".ogg", ".m4a", ".wav", ".opus", ".flac", ".aac")
 AUDIO_FILTER = "Audio files (" + " ".join(f"*{e}" for e in AUDIO_EXTENSIONS) + ");;All files (*)"
 DEFAULT_LIBRARY = Path.home() / "Music" / "Android Sound Manager"
 DEVICE_POLL_MS = 2500
@@ -40,50 +43,12 @@ FOLDER_SOUND = {
     "Alarms": ("alarm", "alarm"),
 }
 
-
-# --------------------------------------------------------------------------- helpers
-
-
-def _human_size(n: int) -> str:
-    size = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{n} B"
+# Kept as module attributes so tests can stub the dialogs.
+_message = message
 
 
 def _slot_label(key: str, keys: list[str]) -> str:
     return "Default" if len(keys) == 1 else f"SIM {keys.index(key) + 1}"
-
-
-def _escape(text: str) -> str:
-    """Escape text for a rich-text QLabel (file names come from the phone)."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def _message(parent, title: str, text: str, ask: bool = False, icon=None) -> bool:
-    """Message box that always renders *text* as plain text (it may contain phone file names).
-
-    With ask=True it is a Yes/Cancel question whose default (Enter) is Cancel.
-    """
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setTextFormat(Qt.TextFormat.PlainText)
-    box.setText(text)
-    if ask:
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-    else:
-        box.setIcon(icon or QMessageBox.Icon.Information)
-    return box.exec() == QMessageBox.StandardButton.Yes
-
-
-def _error_text(exc: BaseException) -> str:
-    if isinstance(exc, (adb.AdbError, ToolNotFoundError, OSError)):
-        return str(exc)
-    return f"{type(exc).__name__}: {exc}"
 
 
 # --------------------------------------------------------------------------- widgets
@@ -126,12 +91,11 @@ class DropTable(QTableWidget):
             event.ignore()
 
 
-class FolderPanel(QWidget):
+class FolderPanel(PhonePanel):
     """One phone folder (e.g. /sdcard/Ringtones) shown as a table with actions."""
 
     def __init__(self, main: MainWindow, folder: str, remote_dir: str):
-        super().__init__()
-        self.main = main
+        super().__init__(main)
         self.remote_dir = remote_dir
         self.sound, self.sound_name = FOLDER_SOUND[folder]
         self.files: list[adb.RemoteFile] = []
@@ -141,7 +105,6 @@ class FolderPanel(QWidget):
         self.undo_serial = ""  # undo only ever applies to the phone it was made on
         self.undo_text = ""
         self._refresh_token = 0
-        self._busy = False
 
         self.table = DropTable(0, 4)
         self.table.setHorizontalHeaderLabels(["Name", "Default", "Size", "Modified"])
@@ -153,7 +116,6 @@ class FolderPanel(QWidget):
         self.table.files_dropped.connect(self.upload_paths)
 
         buttons = QHBoxLayout()
-        self.action_buttons: list[QWidget] = []
         for text, slot in (
             ("Upload…", self.upload),
             ("Download", self.download),
@@ -163,7 +125,7 @@ class FolderPanel(QWidget):
             btn = QPushButton(text)
             btn.clicked.connect(slot)
             buttons.addWidget(btn)
-            self.action_buttons.append(btn)
+            self.action_widgets.append(btn)
         buttons.addStretch()
 
         # Changing a default is always: open menu -> pick an entry -> confirm. Never one click.
@@ -177,7 +139,7 @@ class FolderPanel(QWidget):
         self.undo_button.clicked.connect(self.undo)
         buttons.addWidget(self.set_button)
         buttons.addWidget(self.undo_button)
-        self.action_buttons.append(self.set_button)
+        self.action_widgets.append(self.set_button)
 
         self.current_label = QLabel()
         self.current_label.setTextFormat(Qt.TextFormat.RichText)
@@ -190,32 +152,17 @@ class FolderPanel(QWidget):
         layout.addWidget(self.current_label)
         layout.addWidget(self.table)
         layout.addWidget(hint)
-        self._set_busy(False)
+        self.set_busy(False)
 
-    # ------------------------------------------------------------------ state
+    def has_undo(self) -> bool:
+        return self.undo_snapshot is not None
 
-    def _set_busy(self, busy: bool) -> None:
-        self._busy = busy
-        enabled = self.main.device() is not None and not busy
-        for w in self.action_buttons:
-            w.setEnabled(enabled)
-        self.undo_button.setEnabled(enabled and self.undo_snapshot is not None)
-        self.table.setAcceptDrops(enabled)
+    def undo_widget(self):
+        return self.undo_button
 
-    def _run(self, fn, on_done=None) -> None:
-        """Run *fn* in the background with this panel's buttons disabled meanwhile."""
-        self._set_busy(True)
-
-        def done(result):
-            self._set_busy(False)
-            if on_done:
-                on_done(result)
-
-        def failed(exc):
-            self._set_busy(False)
-            self.main.show_error(exc)
-
-        self.main.runner.submit(fn, done, failed)
+    def set_busy(self, busy: bool) -> None:
+        super().set_busy(busy)
+        self.table.setAcceptDrops(self.main.device() is not None and not busy)
 
     # ------------------------------------------------------------------ refresh
 
@@ -224,7 +171,7 @@ class FolderPanel(QWidget):
         self.files, self.keys, self.defaults = [], [], {}
         self.table.setRowCount(0)
         self.current_label.clear()
-        self._set_busy(False)
+        self.set_busy(False)
 
     def refresh(self) -> None:
         dev = self.main.device()
@@ -245,14 +192,14 @@ class FolderPanel(QWidget):
             if token == self._refresh_token:  # ignore results from an older refresh
                 self._populate(*result)
 
-        self._run(work, done)
+        self.run(work, done)
 
     def _populate(self, files, keys, defaults) -> None:
         self.files, self.keys, self.defaults = files, keys, defaults
         parts = []
         for key, d in defaults.items():
             prefix = "" if len(keys) == 1 else f"{_slot_label(key, keys)}: "
-            parts.append(f"{prefix}<b>{_escape(d.title)}</b>")
+            parts.append(f"{prefix}<b>{escape(d.title)}</b>")
         text = f"Current {self.sound_name}: " + "  ·  ".join(parts) if parts else ""
         self.current_label.setText(text)
 
@@ -268,7 +215,7 @@ class FolderPanel(QWidget):
             when = datetime.fromtimestamp(f.mtime).strftime("%Y-%m-%d %H:%M")
             slots = slots_by_path.get(phone_sounds.to_storage_path(f.path), [])
             marker = ("★ " + ", ".join(slots)) if slots else ""
-            for col, value in enumerate((f.name, marker, _human_size(f.size), when)):
+            for col, value in enumerate((f.name, marker, human_size(f.size), when)):
                 item = QTableWidgetItem(value)
                 if slots:
                     item.setFont(bold)
@@ -316,23 +263,28 @@ class FolderPanel(QWidget):
         if not _message(self, f"Change {self.sound_name}", question, ask=True):
             return
 
-        def work():
-            snapshot: phone_sounds.Snapshot = {}
-            for key in keys:
-                for k, v in phone_sounds.set_default(dev, key, target.path).items():
-                    snapshot.setdefault(k, v)
-            return snapshot
+        journal = self.main.journal
+        snapshot: phone_sounds.Snapshot = {}  # filled as each key succeeds
 
-        def done(snapshot):
-            self.undo_snapshot, self.undo_serial = snapshot, dev.serial
-            self.undo_text = f"{self.sound_name} change"
+        def work():
+            for key in keys:
+                for k, v in phone_sounds.set_default(dev, key, target.path, journal).items():
+                    snapshot.setdefault(k, v)
+
+        def remember_undo():
+            if snapshot:
+                self.undo_snapshot, self.undo_serial = dict(snapshot), dev.serial
+                self.undo_text = f"{self.sound_name} change"
+
+        def done(_):
+            remember_undo()
             where = ""
             if len(self.keys) > 1:
                 where = " (" + ", ".join(_slot_label(k, self.keys) for k in keys) + ")"
             self.main.status(f"{self.sound_name.capitalize()}{where} set to {target.name}.")
             self.refresh()
 
-        self._run(work, done)
+        self.run(work, done, lambda _exc: remember_undo())
 
     def undo(self) -> None:
         dev = self.main.device()
@@ -341,14 +293,14 @@ class FolderPanel(QWidget):
         if dev.serial != self.undo_serial:
             _message(self, "Different phone", "That change was made on a different phone.")
             return
-        snapshot = self.undo_snapshot
+        snapshot, journal = self.undo_snapshot, self.main.journal
 
         def done(_):
             self.undo_snapshot = None
             self.main.status(f"Undid {self.undo_text}.")
             self.refresh()
 
-        self._run(lambda: phone_sounds.restore(dev, snapshot), done)
+        self.run(lambda: phone_sounds.restore(dev, snapshot, journal), done)
 
     # ------------------------------------------------------------------ files
 
@@ -380,12 +332,22 @@ class FolderPanel(QWidget):
                 return
 
         remote_dir = self.remote_dir
+        uploaded: list[str] = []
+
+        def work():
+            for p in local:
+                dev.push(p, remote_dir)
+                uploaded.append(p.name)
 
         def done(_):
-            self.main.status(f"Uploaded {len(local)} file(s).")
+            self.main.status(f"Uploaded {len(uploaded)} file(s).")
             self.refresh()
 
-        self._run(lambda: [dev.push(p, remote_dir) for p in local], done)
+        def failed(_exc):
+            if uploaded:
+                self.main.status(f"Uploaded {len(uploaded)} of {len(local)} file(s).", 0)
+
+        self.run(work, done, failed)
 
     def download(self) -> None:
         dev = self.main.device()
@@ -395,7 +357,7 @@ class FolderPanel(QWidget):
         target = QFileDialog.getExistingDirectory(self, "Download to", str(DEFAULT_LIBRARY))
         if not target:
             return
-        self._run(
+        self.run(
             lambda: [dev.pull(f.path, Path(target)) for f in selected],
             lambda _: self.main.status(f"Downloaded {len(selected)} file(s) to {target}"),
         )
@@ -408,27 +370,29 @@ class FolderPanel(QWidget):
         names = "\n".join(f.name for f in selected)
         if not _message(self, "Delete from phone", f"Delete from the phone?\n\n{names}", ask=True):
             return
-        self._run(lambda: [dev.delete(f.path) for f in selected], lambda _: self.refresh())
+        self.run(lambda: [dev.delete(f.path) for f in selected], lambda _: self.refresh())
 
 
 # --------------------------------------------------------------------------- main window
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, journal: Journal | None = None):
         super().__init__()
         self.setWindowTitle("Android Sound Manager")
-        self.resize(1040, 640)
+        self.resize(1080, 660)
         self.devices: list[adb.Device] = []
         self.names: dict[str, str] = {}  # serial -> friendly name (in memory only, never logged)
+        self.journal = journal or Journal()
         self._poll_error_shown = False
+        self._last_disconnect_notice = 0.0
 
         self.runner = TaskRunner(self.show_error, self, name="phone")
         self.poller = TaskRunner(self._poll_failed, self, name="poll")
 
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(360)
-        self.device_combo.currentIndexChanged.connect(lambda _: self.refresh_folders())
+        self.device_combo.currentIndexChanged.connect(lambda _: self.refresh_panels())
 
         top = QHBoxLayout()
         top.addWidget(QLabel("Phone:"))
@@ -436,11 +400,14 @@ class MainWindow(QMainWindow):
         top.addStretch()
 
         self.tabs = QTabWidget()
-        self.panels: list[FolderPanel] = []
+        self.panels: list[PhonePanel] = []
         for name, path in adb.SOUND_FOLDERS.items():
             panel = FolderPanel(self, name, path)
             self.panels.append(panel)
             self.tabs.addTab(panel, name)
+        self.contacts_panel = ContactsPanel(self)
+        self.panels.append(self.contacts_panel)
+        self.tabs.addTab(self.contacts_panel, "Contacts")
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -465,11 +432,26 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ helpers
 
+    @property
+    def folder_panels(self) -> list[FolderPanel]:
+        return [p for p in self.panels if isinstance(p, FolderPanel)]
+
     def status(self, text: str, ms: int = 8000) -> None:
         self.statusBar().showMessage(text, ms)
 
     def show_error(self, exc: BaseException) -> None:
-        _message(self, "Error", _error_text(exc), icon=QMessageBox.Icon.Warning)
+        if adb.is_disconnect_error(exc):
+            # One calm notice instead of a stack of dialogs from every queued task.
+            now = time.monotonic()
+            if now - self._last_disconnect_notice > 5:
+                self._last_disconnect_notice = now
+                self.status(
+                    "Phone disconnected. No file or setting was left half-written; anything "
+                    "interrupted is cleaned up when it reconnects.",
+                    0,
+                )
+            return
+        _message(self, "Error", error_text(exc), icon=QMessageBox.Icon.Warning)
 
     def device(self) -> adb.AdbDevice | None:
         i = self.device_combo.currentIndex() if hasattr(self, "device_combo") else -1
@@ -477,7 +459,7 @@ class MainWindow(QMainWindow):
             return adb.AdbDevice(self.devices[i].serial)
         return None
 
-    def refresh_folders(self) -> None:
+    def refresh_panels(self) -> None:
         for panel in self.panels:
             panel.refresh()
 
@@ -490,7 +472,7 @@ class MainWindow(QMainWindow):
     def _poll_failed(self, exc: BaseException) -> None:
         if not self._poll_error_shown:  # don't nag every few seconds
             self._poll_error_shown = True
-            self.status(f"Can't list phones: {_error_text(exc)}", 0)
+            self.status(f"Can't list phones: {error_text(exc)}", 0)
 
     def _label(self, d: adb.Device) -> str:
         name = self.names.get(d.serial)
@@ -503,6 +485,9 @@ class MainWindow(QMainWindow):
         self._poll_error_shown = False
         if [(d.serial, d.state) for d in devices] == [(d.serial, d.state) for d in self.devices]:
             return
+        newly_ready = {d.serial for d in devices if d.ready} - {
+            d.serial for d in self.devices if d.ready
+        }
         previous = self.device()
         prev_serial = previous.serial if previous else None
         self.devices = devices
@@ -528,12 +513,30 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().clearMessage()
 
+        # Repair anything a previous disconnect interrupted before showing fresh data.
+        for serial in newly_ready:
+            self._run_maintenance(serial)
         current = self.device()
         if (current.serial if current else None) != prev_serial:
-            self.refresh_folders()
+            self.refresh_panels()
         for d in ready:
             if d.serial not in self.names:
                 self._fetch_name(d.serial)
+
+    def _run_maintenance(self, serial: str) -> None:
+        dev, journal = adb.AdbDevice(serial), self.journal
+
+        def work():
+            dev.cleanup_partial_uploads()
+            return phone_sounds.recover_pending(dev, journal)
+
+        def done(note):
+            if note:
+                self.status(note, 0)
+                for panel in self.folder_panels:
+                    panel.refresh()
+
+        self.runner.submit(work, done, lambda _exc: None)
 
     def _fetch_name(self, serial: str) -> None:
         self.names[serial] = ""  # mark as requested

@@ -14,6 +14,7 @@ standard key. Every command sent to the phone is built from validated values and
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 import time
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .adb import AdbDevice, AdbError, is_in_sound_folder
+from .journal import Journal
 
 # Standard Settings.System keys per sound type (index 0 = SIM 1 / only SIM).
 SOUND_KEYS: dict[str, tuple[str, ...]] = {
@@ -173,7 +175,77 @@ def get_default(dev: AdbDevice, key: str) -> DefaultSound:
 Snapshot = dict[str, str | None]
 
 
-def set_default(dev: AdbDevice, key: str, remote_path: str) -> Snapshot:
+def _check_snapshot_keys(snapshot: Snapshot) -> None:
+    for k in snapshot:
+        _check_key(k.removesuffix("_CONSTANT_PATH").removesuffix("_set"))
+
+
+def _put_command(key: str, value: str | None) -> str:
+    if value is None:
+        return f"settings delete system {shlex.quote(key)}"
+    return f"settings put system {shlex.quote(key)} {shlex.quote(value)}"
+
+
+def _read(dev: AdbDevice, keys) -> Snapshot:
+    return {k: _settings_get(dev, k) for k in keys}
+
+
+def _apply(dev: AdbDevice, values: Snapshot) -> None:
+    """Write all *values* in ONE shell command so they land together (milliseconds apart)."""
+    _check_snapshot_keys(values)
+    dev.shell(" && ".join(_put_command(k, v) for k, v in values.items()))
+
+
+def _apply_journaled(dev: AdbDevice, new: Snapshot, journal: Journal | None) -> Snapshot:
+    """Apply *new* settings all-or-nothing. Returns the previous values.
+
+    The old and new values are journaled on the PC first. If the phone disconnects midway and
+    can't be restored right away, recover_pending() finishes the rollback when it reconnects.
+    """
+    if journal is not None:
+        recover_pending(dev, journal)  # never stack a new change on an unresolved one
+    old = _read(dev, new)
+    if journal is not None:
+        journal.save(dev.serial, {"kind": "settings", "old": old, "new": new})
+    try:
+        _apply(dev, new)
+        if _read(dev, new) != new:
+            raise AdbError("The phone did not accept the new setting; nothing was changed.")
+    except AdbError:
+        with contextlib.suppress(AdbError):  # roll back now if the phone is still there
+            _apply(dev, old)
+            if _read(dev, old) == old and journal is not None:
+                journal.clear(dev.serial)
+        raise
+    if journal is not None:
+        journal.clear(dev.serial)
+    return old
+
+
+def recover_pending(dev: AdbDevice, journal: Journal) -> str | None:
+    """Resolve a change that a disconnect interrupted. Returns a message if anything was fixed."""
+    entry = journal.load(dev.serial)
+    if not entry or entry.get("kind") != "settings":
+        return None
+    old, new = entry.get("old") or {}, entry.get("new") or {}
+    try:
+        _check_snapshot_keys(old)
+        _check_snapshot_keys(new)
+    except AdbError:
+        journal.clear(dev.serial)  # tampered or corrupt entry: refuse to act on it
+        return None
+    current = _read(dev, new)
+    if current in (new, old):  # finished, or never started: nothing to repair
+        journal.clear(dev.serial)
+        return None
+    _apply(dev, old)
+    journal.clear(dev.serial)
+    return "A sound change interrupted by a disconnect was rolled back."
+
+
+def set_default(
+    dev: AdbDevice, key: str, remote_path: str, journal: Journal | None = None
+) -> Snapshot:
     """Make the file at *remote_path* the default for *key*. Returns the old values for undo."""
     _check_key(key)
     if not is_in_sound_folder(remote_path):
@@ -181,7 +253,7 @@ def set_default(dev: AdbDevice, key: str, remote_path: str) -> Snapshot:
 
     media = find_media(dev, remote_path)
     uri = build_sound_uri(current_user(dev), media.id, media.title)
-    values: dict[str, str] = {key: uri}
+    values: Snapshot = {key: uri}
 
     # Samsung companion keys, only if the phone already uses them.
     for suffix in COMPANION_SUFFIXES:
@@ -189,20 +261,10 @@ def set_default(dev: AdbDevice, key: str, remote_path: str) -> Snapshot:
             values[key + suffix] = (
                 build_constant_path(media.path) if suffix == "_CONSTANT_PATH" else "1"
             )
-
-    previous: Snapshot = {k: _settings_get(dev, k) for k in values}
-    for k, v in values.items():
-        _settings_put(dev, k, v)
-
-    if _settings_get(dev, key) != uri:
-        restore(dev, previous)
-        raise AdbError("The phone did not accept the new setting; nothing was changed.")
-    return previous
+    return _apply_journaled(dev, values, journal)
 
 
-def restore(dev: AdbDevice, snapshot: Snapshot) -> None:
+def restore(dev: AdbDevice, snapshot: Snapshot, journal: Journal | None = None) -> None:
     """Undo a set_default() using the snapshot it returned."""
-    for k, v in snapshot.items():
-        base = k.removesuffix("_CONSTANT_PATH").removesuffix("_set")
-        _check_key(base)
-        _settings_put(dev, k, v)
+    _check_snapshot_keys(snapshot)
+    _apply_journaled(dev, snapshot, journal)
