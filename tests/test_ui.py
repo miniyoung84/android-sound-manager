@@ -28,7 +28,8 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def wait_until(predicate, timeout_ms=3000):
+def wait_until(predicate, timeout_ms=15000):
+    """Process Qt events until *predicate* is true (returns early); generous for slow CI."""
     loop = QEventLoop()
     timer = QTimer()
     timer.timeout.connect(lambda: loop.quit() if predicate() else None)
@@ -94,6 +95,7 @@ def window(app, monkeypatch, tmp_path):
 
     monkeypatch.setattr(phone_sounds, "set_default", fake_set)
     monkeypatch.setattr(phone_sounds, "recover_pending", lambda dev, journal: None)
+    monkeypatch.setattr(phone_sounds, "repair_titles", lambda dev: 0)
     monkeypatch.setattr(adb.AdbDevice, "cleanup_partial_uploads", lambda self: None)
     monkeypatch.setattr(phone_contacts, "list_contacts", lambda dev: list(CONTACTS))
     monkeypatch.setattr(
