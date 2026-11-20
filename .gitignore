@@ -28,6 +28,7 @@ local.properties
 
 # ---- Android / Gradle (android/ companion app) ----
 .gradle/
+.kotlin/
 android/**/build/
 android/app/release/
 android/captures/
