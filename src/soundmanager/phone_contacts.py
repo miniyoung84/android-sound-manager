@@ -102,6 +102,24 @@ def describe_ringtones(dev: AdbDevice, uris: set[str]) -> dict[str, str]:
     return names
 
 
+def ringtone_paths(dev: AdbDevice, uris: set[str]) -> dict[str, str]:
+    """Map ringtone URIs of files in shared storage to their paths on the phone.
+
+    Built-in sounds and missing files are left out.
+    """
+    ids: dict[int, list[str]] = {}
+    for uri in uris:
+        if (m := _MEDIA_URI_RE.match(uri)) and m.group(1) == "external":
+            ids.setdefault(int(m.group(2)), []).append(uri)
+    if not ids:
+        return {}
+    where = "_id IN (" + ",".join(str(i) for i in sorted(ids)) + ")"
+    out = dev.shell(
+        f"content query --uri {MEDIA_URI} --projection _id:title:_data --where {shlex.quote(where)}"
+    )
+    return {uri: row.path for row in parse_media_rows(out) for uri in ids.get(row.id, [])}
+
+
 def _write_ringtone(dev: AdbDevice, contact_id: int, uri: str | None) -> None:
     binding = "custom_ringtone:n:" if uri is None else f"custom_ringtone:s:{uri}"
     dev.shell(

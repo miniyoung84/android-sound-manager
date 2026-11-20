@@ -167,11 +167,11 @@ fun App(shared: Uri? = null, onShareClosed: (saved: Boolean) -> Unit = {}) {
                 shareSource = null
                 onShareClosed(false)
             },
-            onSaved = { type, id, title ->
+            onSaved = { type, id, title, madeDefault ->
                 shareSource = null
                 tab = soundTabs.indexOf(type)
                 savedId = id
-                message = "Saved “$title” to ${type.folder}."
+                message = savedMessage(type, title, madeDefault)
                 onShareClosed(true)
             },
         )

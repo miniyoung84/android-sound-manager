@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QMessageBox, QTableWidget, QWidget
 
 from .. import adb
 from ..audio import AudioError
+from ..backup import BackupError
+from ..companion import CompanionError
 from ..tools import ToolNotFoundError
 from ..youtube import YoutubeError
 
@@ -53,7 +55,18 @@ def message(parent, title: str, text: str, ask: bool = False, icon=None) -> bool
 
 
 def error_text(exc: BaseException) -> str:
-    if isinstance(exc, (adb.AdbError, AudioError, YoutubeError, ToolNotFoundError, OSError)):
+    if isinstance(
+        exc,
+        (
+            adb.AdbError,
+            AudioError,
+            YoutubeError,
+            ToolNotFoundError,
+            CompanionError,
+            BackupError,
+            OSError,
+        ),
+    ):
         return str(exc)
     return f"{type(exc).__name__}: {exc}"
 

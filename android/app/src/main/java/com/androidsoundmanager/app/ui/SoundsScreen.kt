@@ -1,6 +1,7 @@
 package com.androidsoundmanager.app.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -138,12 +139,7 @@ fun SoundsScreen(type: SoundType, selectOnLoad: Long? = null, onSelectedOnLoad: 
             reload++
         }
     }
-    val grantAccess = {
-        context.startActivity(
-            Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
-                .setData("package:${context.packageName}".toUri()),
-        )
-    }
+    val grantAccess = { openWriteSettings(context) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val twoPane = maxWidth >= TwoPaneWidth
@@ -212,11 +208,11 @@ fun SoundsScreen(type: SoundType, selectOnLoad: Long? = null, onSelectedOnLoad: 
                 source = src,
                 initialType = type,
                 onDismiss = { editor = null },
-                onSaved = { savedType, id, title ->
+                onSaved = { savedType, id, title, madeDefault ->
                     editor = null
                     if (savedType == type) selectId = id
                     reload++
-                    message = "Saved “$title” to ${savedType.folder}."
+                    message = savedMessage(savedType, title, madeDefault)
                 },
             )
         }
@@ -451,24 +447,43 @@ private fun SoundDetail(
         )
     }
     if (explainAccess) {
-        AlertDialog(
-            onDismissRequest = { explainAccess = false },
-            title = { Text("One-time permission") },
-            text = {
-                Text(
-                    "Android asks you to allow “Modify system settings” before an app " +
-                        "can change your ${type.label}. Sound Manager only uses it for your " +
-                        "ringtone, notification and alarm sounds.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { explainAccess = false; onGrantAccess() }) {
-                    Text("Open settings")
-                }
-            },
-            dismissButton = { TextButton(onClick = { explainAccess = false }) { Text("Not now") } },
-        )
+        WriteSettingsDialog(type, onOpen = onGrantAccess) { explainAccess = false }
     }
+}
+
+/** Opens the "Modify system settings" page for this app. */
+fun openWriteSettings(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).setData("package:${context.packageName}".toUri()),
+    )
+}
+
+/** Explains the one-time "Modify system settings" access before sending the user there. */
+@Composable
+fun WriteSettingsDialog(type: SoundType, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("One-time permission") },
+        text = {
+            Text(
+                "Android asks you to allow “Modify system settings” before an app " +
+                    "can change your ${type.label}. Sound Manager only uses it for your " +
+                    "ringtone, notification and alarm sounds.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onDismiss(); onOpen() }) { Text("Open settings") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
+}
+
+/** What to tell the user after the editor saved a sound (and maybe made it a default). */
+fun savedMessage(type: SoundType, title: String, madeDefault: Boolean?): String = when (madeDefault) {
+    true -> "Saved “$title” to ${type.folder} and made it your ${type.label}."
+    false -> "Saved “$title” to ${type.folder}, but couldn't make it your ${type.label}. " +
+        "Open the sound and use Set as ${type.label}."
+    null -> "Saved “$title” to ${type.folder}."
 }
 
 fun formatDuration(ms: Long): String {

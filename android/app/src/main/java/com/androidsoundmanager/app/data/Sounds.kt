@@ -99,9 +99,12 @@ class SoundRepository(private val context: Context) {
     /** "Modify system settings" special access, needed to change the default sounds. */
     fun canChangeDefaults(): Boolean = Settings.System.canWrite(context)
 
-    fun setDefault(type: SoundType, sound: Sound) {
+    fun setDefault(type: SoundType, sound: Sound) = setDefault(type, sound.id)
+
+    fun setDefault(type: SoundType, mediaId: Long) {
         check(canChangeDefaults()) { "Permission to modify system settings is missing" }
-        RingtoneManager.setActualDefaultRingtoneUri(context, type.ringtoneType, sound.uri)
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId)
+        RingtoneManager.setActualDefaultRingtoneUri(context, type.ringtoneType, uri)
     }
 
     /**

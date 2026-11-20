@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.androidsoundmanager.app.data.Analysis
 import com.androidsoundmanager.app.data.AudioEngine
 import com.androidsoundmanager.app.data.Edit
@@ -113,13 +114,24 @@ fun SoundEditor(
     source: EditorSource,
     initialType: SoundType,
     onDismiss: () -> Unit,
-    onSaved: (type: SoundType, id: Long, title: String) -> Unit,
+    /** [madeDefault]: null if not asked to set it as a default, else whether that worked. */
+    onSaved: (type: SoundType, id: Long, title: String, madeDefault: Boolean?) -> Unit,
 ) {
     val context = LocalContext.current
     val repo = remember { SoundRepository(context.applicationContext) }
     val scope = rememberCoroutineScope()
     val player = remember { SelectionPlayer(context.applicationContext) }
     DisposableEffect(Unit) { onDispose { player.stop() } }
+    // "Also make it my ringtone": needs "Modify system settings"; re-checked on return.
+    var alsoSetDefault by rememberSaveable(source) { mutableStateOf(false) }
+    var canChange by remember { mutableStateOf(repo.canChangeDefaults()) }
+    var explainAccess by remember { mutableStateOf(false) }
+    var confirmSet by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        canChange = repo.canChangeDefaults()
+        if (!canChange) alsoSetDefault = false
+        onPauseOrDispose { player.stop() }
+    }
 
     var analysis by remember(source) { mutableStateOf<Analysis?>(null) }
     var loadProgress by remember(source) { mutableFloatStateOf(0f) }
@@ -160,24 +172,25 @@ fun SoundEditor(
         }
     }
 
-    val save: () -> Unit = save@{
+    val doSave: (Boolean) -> Unit = save@{ setDefault ->
         val an = a ?: return@save
         player.stop()
         saving = true
         saveProgress = 0f
         scope.launch {
             val name = title.trim().ifEmpty { source.title }
+            val saveType = type
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val plain = repo.audioType(source.uri)
                     if (edit.isUntouched(an.durationMs) && plain != null) {
                         // Nothing changed: keep the original audio exactly (no re-encoding).
-                        repo.save(type, name, plain.first, plain.second) { repo.copy(source.uri, it) }
+                        repo.save(saveType, name, plain.first, plain.second) { repo.copy(source.uri, it) }
                     } else {
                         val temp = File.createTempFile("edit", ".m4a", context.cacheDir)
                         try {
                             AudioEngine.render(context, source.uri, edit, an, temp) { saveProgress = it }
-                            repo.save(type, name, "audio/mp4", "m4a") { out ->
+                            repo.save(saveType, name, "audio/mp4", "m4a") { out ->
                                 temp.inputStream().use { it.copyTo(out) }
                             }
                         } finally {
@@ -186,11 +199,21 @@ fun SoundEditor(
                     }
                 }
             }
+            // Only once the file is completely saved does the default change.
+            val madeDefault = if (setDefault && result.isSuccess) {
+                withContext(Dispatchers.IO) {
+                    runCatching { repo.setDefault(saveType, result.getOrThrow()) }.isSuccess
+                }
+            } else {
+                null
+            }
             saving = false
-            result.onSuccess { id -> onSaved(type, id, name) }
+            result.onSuccess { id -> onSaved(saveType, id, name, madeDefault) }
                 .onFailure { error = "Couldn't save: ${userMessage(it)}" }
         }
     }
+    // Setting a default always takes a confirmation, so it can't happen by accident.
+    val save: () -> Unit = { if (alsoSetDefault) confirmSet = true else doSave(false) }
 
     Dialog(
         onDismissRequest = close,
@@ -241,6 +264,10 @@ fun SoundEditor(
                             onNormalize = { normalize = it },
                             type = type,
                             onType = { type = it },
+                            alsoSetDefault = alsoSetDefault,
+                            onAlsoSetDefault = { on ->
+                                if (on && !canChange) explainAccess = true else alsoSetDefault = on
+                            },
                             player = player,
                             onPreview = {
                                 if (player.active) {
@@ -290,6 +317,21 @@ fun SoundEditor(
             dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Keep editing") } },
         )
     }
+    if (explainAccess) {
+        WriteSettingsDialog(type, onOpen = { openWriteSettings(context) }) { explainAccess = false }
+    }
+    if (confirmSet) {
+        val name = title.trim().ifEmpty { source.title }
+        AlertDialog(
+            onDismissRequest = { confirmSet = false },
+            title = { Text("Save and set as ${type.label}?") },
+            text = { Text("“$name” will be saved to ${type.folder} and become your ${type.label}.") },
+            confirmButton = {
+                TextButton(onClick = { confirmSet = false; doSave(true) }) { Text("Save and set") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSet = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -307,6 +349,8 @@ private fun EditorBody(
     onNormalize: (Boolean) -> Unit,
     type: SoundType,
     onType: (SoundType) -> Unit,
+    alsoSetDefault: Boolean,
+    onAlsoSetDefault: (Boolean) -> Unit,
     player: SelectionPlayer,
     onPreview: () -> Unit,
     enabled: Boolean,
@@ -425,6 +469,17 @@ private fun EditorBody(
                         label = { Text(t.folder, maxLines = 1) },
                     )
                 }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Also make it my ${type.label}", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "You'll be asked to confirm when you save",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = alsoSetDefault, onCheckedChange = onAlsoSetDefault, enabled = enabled)
             }
             Text(
                 "Saved as a new file. The original isn't changed.",

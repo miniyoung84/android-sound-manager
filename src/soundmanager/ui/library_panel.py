@@ -315,6 +315,18 @@ class LibraryPanel(QWidget):
             return
         for name in adb.SOUND_FOLDERS:
             self.send_menu.addAction(f"To {name}", lambda n=name: self.send_to(n))
+        if len(selected) == 1:
+            self.send_menu.addSeparator()
+            sub = self.send_menu.addMenu("Send and set as")
+            self.main.add_set_on_phone_actions(sub, self.send_and_set)
+
+    def send_and_set(self, panel, keys: list[str]) -> None:
+        selected = self._selected()
+        if len(selected) != 1:
+            return
+        item = selected[0]
+        if self.main.confirm_send_and_set(panel, keys, item.name):
+            panel.send_and_set(item.path, keys)
 
     def send_to(self, folder: str) -> None:
         selected = self._selected()

@@ -50,6 +50,7 @@ _DISCONNECT_MARKERS = (
 )
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 
 
 class AdbError(RuntimeError):
@@ -92,6 +93,28 @@ def safe_local_name(name: str) -> str:
     if cleaned.split(".", 1)[0].lower() in _WINDOWS_RESERVED:
         cleaned = "_" + cleaned
     return cleaned[:200]
+
+
+def valid_phone_file_name(name: str) -> bool:
+    """A plain, visible file name for a sound folder (no paths, no control characters)."""
+    return (
+        0 < len(name) <= 200
+        and not name.startswith(".")
+        and not any(c in name for c in "/\\\x00\n\r")
+    )
+
+
+def unique_remote_name(name: str, existing: set[str]) -> str:
+    """*name*, or `name (2).ext`, ... if a file with that name exists (compared ignoring case,
+    like the phone's storage). *existing* holds lower-case names."""
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    candidate, n = name, 2
+    while candidate.lower() in existing:
+        candidate = f"{stem} ({n}){dot}{ext}"
+        n += 1
+    return candidate
 
 
 def unique_path(path: Path) -> Path:
@@ -235,14 +258,18 @@ class AdbDevice:
         out = self.shell(f"stat -c %s {shlex.quote(remote)} 2>/dev/null; true").strip()
         return int(out) if out.isdigit() else None
 
-    def push(self, local: Path, remote_dir: str) -> str:
-        """Upload *local* into *remote_dir*, replacing any file of the same name.
+    def push(self, local: Path, remote_dir: str, name: str | None = None) -> str:
+        """Upload *local* into *remote_dir* (as *name*, default its own name), replacing any file
+        of the same name.
 
         The file is copied to a hidden temporary name, its size is checked, and only then is it
         renamed over the final name (a rename is atomic). If the phone disconnects midway, any
         existing file is untouched and the leftover temp file is removed on the next connect.
         """
-        remote = str(PurePosixPath(remote_dir) / local.name)
+        name = local.name if name is None else name
+        if not valid_phone_file_name(name):
+            raise AdbError(f"Not a usable file name: {name!r}")
+        remote = str(PurePosixPath(remote_dir) / name)
         if not is_in_sound_folder(remote):
             raise AdbError(f"Refusing to upload outside the sound folders: {remote}")
         size = local.stat().st_size
@@ -251,7 +278,7 @@ class AdbDevice:
         try:
             self._adb("push", str(local), temp, timeout=600)
             if self.remote_size(temp) != size:
-                raise AdbError(f"Upload of {local.name} was incomplete; nothing was changed.")
+                raise AdbError(f"Upload of {name} was incomplete; nothing was changed.")
             self.shell(f"mv -f {shlex.quote(temp)} {shlex.quote(remote)}")
         except AdbError:
             with contextlib.suppress(AdbError):  # best effort: the phone may already be gone
@@ -294,3 +321,14 @@ class AdbDevice:
         if not is_in_sound_folder(remote):
             raise AdbError(f"Refusing to delete outside the sound folders: {remote}")
         self.shell(f"rm -f {shlex.quote(remote)}")
+
+    def install(self, apk: Path) -> None:
+        """Install or update an app (`adb install -r`). Never grants permissions or downgrades."""
+        out = self._adb("install", "-r", str(apk), timeout=600)
+        if "Success" not in out:
+            raise AdbError(out.strip() or "The phone did not install the app.")
+
+    def uninstall(self, package: str) -> None:
+        if not _PACKAGE_RE.match(package):
+            raise AdbError(f"Not a package name: {package!r}")
+        self._adb("uninstall", package, timeout=120)

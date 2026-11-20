@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import adb, library, phone_sounds
+from .. import adb, backup, companion, library, phone_sounds
 from ..journal import Journal
 from ..tools import tool_status
 from .app_sounds_panel import AppSoundsPanel
@@ -211,12 +212,25 @@ class FolderPanel(PhonePanel):
                 lambda: self.set_default(list(self.keys)),
             )
             return
+        self.add_slot_actions(self.set_menu, self.set_default)
+
+    def add_slot_actions(self, menu: QMenu, choose: Callable[[list[str]], None]) -> None:
+        """One entry per SIM plus "All SIMs" (dual-SIM ringtones), else a single entry."""
+        if len(self.keys) == 1:
+            menu.addAction(f"As {self.sound_name}…", lambda: choose(list(self.keys)))
+            return
         for key in self.keys:
-            self.set_menu.addAction(
-                f"{_slot_label(key, self.keys)}…", lambda k=key: self.set_default([k])
-            )
-        self.set_menu.addSeparator()
-        self.set_menu.addAction("All SIMs…", lambda: self.set_default(list(self.keys)))
+            menu.addAction(f"{_slot_label(key, self.keys)}…", lambda k=key: choose([k]))
+        menu.addSeparator()
+        menu.addAction("All SIMs…", lambda: choose(list(self.keys)))
+
+    def change_lines(self, keys: list[str], new_name: str) -> str:
+        """Lines like `SIM 1:  old  →  new` for a confirmation dialog."""
+        lines = []
+        for k in keys:
+            old = self.defaults[k].title if k in self.defaults else "?"
+            lines.append(f"  {_slot_label(k, self.keys)}:  {old}  →  {new_name}")
+        return "\n".join(lines)
 
     def set_default(self, keys: list[str]) -> None:
         dev = self.main.device()
@@ -224,22 +238,45 @@ class FolderPanel(PhonePanel):
         if not dev or not keys or len(selected) != 1:
             return
         target = selected[0]
-        lines = []
-        for k in keys:
-            old = self.defaults[k].title if k in self.defaults else "?"
-            lines.append(f"  {_slot_label(k, self.keys)}:  {old}  →  {target.name}")
         question = (
-            f"Change your {self.sound_name}?\n\n" + "\n".join(lines) + "\n\nYou can undo this."
+            f"Change your {self.sound_name}?\n\n"
+            + self.change_lines(keys, target.name)
+            + "\n\nYou can undo this."
         )
         if not _message(self, f"Change {self.sound_name}", question, ask=True):
             return
+        self._apply_default(keys, lambda: target.path)
 
-        journal = self.main.journal
+    def send_and_set(self, local: Path, keys: list[str]) -> None:
+        """Upload *local* (renamed if the name is taken) and make it the default for *keys*.
+
+        The caller has already asked the user to confirm.
+        """
+        dev = self.main.device()
+        if not dev or not keys:
+            return
+        remote_dir = self.remote_dir
+
+        def upload() -> str:
+            existing = {f.name.lower() for f in dev.list_dir(remote_dir)}
+            name = adb.unique_remote_name(adb.safe_local_name(local.name), existing)
+            return dev.push(local, remote_dir, name=name)
+
+        self._apply_default(keys, upload)
+
+    def _apply_default(self, keys: list[str], target: Callable[[], str]) -> None:
+        """Make the phone file *target()* returns (in the background) the default for *keys*."""
+        dev, journal = self.main.device(), self.main.journal
+        if not dev:
+            return
         snapshot: phone_sounds.Snapshot = {}  # filled as each key succeeds
+        chosen: list[str] = []
 
         def work():
+            path = target()
+            chosen.append(path)
             for key in keys:
-                for k, v in phone_sounds.set_default(dev, key, target.path, journal).items():
+                for k, v in phone_sounds.set_default(dev, key, path, journal).items():
                     snapshot.setdefault(k, v)
 
         def remember_undo():
@@ -252,10 +289,16 @@ class FolderPanel(PhonePanel):
             where = ""
             if len(self.keys) > 1:
                 where = " (" + ", ".join(_slot_label(k, self.keys) for k in keys) + ")"
-            self.main.status(f"{self.sound_name.capitalize()}{where} set to {target.name}.")
+            name = PurePosixPath(chosen[0]).name
+            self.main.status(f"{self.sound_name.capitalize()}{where} set to {name}.")
             self.refresh()
 
-        self.run(work, done, lambda _exc: remember_undo())
+        def failed(_exc):
+            remember_undo()
+            if chosen:  # the upload worked even though setting it didn't
+                self.refresh()
+
+        self.run(work, done, failed)
 
     def undo(self) -> None:
         dev = self.main.device()
@@ -368,10 +411,30 @@ class MainWindow(QMainWindow):
         self.device_combo.setMinimumWidth(360)
         self.device_combo.currentIndexChanged.connect(lambda _: self.refresh_panels())
 
+        # Phone app install/update, and backup/restore of the phone's sounds and settings.
+        self._app_version: tuple[str, companion.Version | None] | None = None  # (serial, ver)
+        self._app_busy = False
+        self._app_source = companion.source_version()  # version this PC would install
+        self.app_button = QPushButton("Phone app")
+        self.app_button.setToolTip("Install or update Sound Manager on the phone")
+        self.app_button.clicked.connect(self.install_phone_app)
+        self.app_button.setVisible(companion.available())
+        self.backup_button = QPushButton("Back up phone…")
+        self.backup_button.setToolTip(
+            "Save the phone's custom sounds, default sounds and contact ringtones to one file"
+        )
+        self.backup_button.clicked.connect(self.backup_phone)
+        self.restore_button = QPushButton("Restore…")
+        self.restore_button.setToolTip("Put a backup's sounds and settings back on the phone")
+        self.restore_button.clicked.connect(self.restore_phone)
+
         top = QHBoxLayout()
         top.addWidget(QLabel("Phone:"))
         top.addWidget(self.device_combo)
         top.addStretch()
+        top.addWidget(self.app_button)
+        top.addWidget(self.backup_button)
+        top.addWidget(self.restore_button)
 
         self.tabs = QTabWidget()
         self.library_panel = LibraryPanel(self, library_dir or library.DEFAULT_LIBRARY)
@@ -399,6 +462,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.busy_label)
         for r in (self.runner, self.media_runner):
             r.busy_changed.connect(self._update_busy)
+        self._update_top_buttons()
 
         missing = [name for name, path in tool_status().items() if path is None]
         if missing:
@@ -422,6 +486,30 @@ class MainWindow(QMainWindow):
 
     def _update_busy(self, _=None) -> None:
         self.busy_label.setVisible(self.runner.busy or self.media_runner.busy)
+        self._update_top_buttons()
+
+    def _update_top_buttons(self) -> None:
+        dev = self.device()
+        phone_free = dev is not None and not self.runner.busy
+        self.backup_button.setEnabled(phone_free)
+        self.restore_button.setEnabled(phone_free)
+        self.app_button.setEnabled(dev is not None and not self._app_busy)
+        installed = self._installed_app(dev)
+        src = self._app_source
+        if dev is None or self._app_version is None or self._app_version[0] != dev.serial:
+            text = "Phone app"
+        elif installed is None:
+            text = "Install phone app"
+        elif src is not None and installed.code < src.code:
+            text = f"Update phone app ({installed.name} → {src.name})"
+        else:
+            text = f"Phone app {installed.name} ✓"
+        self.app_button.setText(text)
+
+    def _installed_app(self, dev: adb.AdbDevice | None) -> companion.Version | None:
+        if dev is None or self._app_version is None or self._app_version[0] != dev.serial:
+            return None
+        return self._app_version[1]
 
     def status(self, text: str, ms: int = 8000) -> None:
         self.statusBar().showMessage(text, ms)
@@ -445,6 +533,32 @@ class MainWindow(QMainWindow):
         if 0 <= i < len(self.devices) and self.devices[i].ready:
             return adb.AdbDevice(self.devices[i].serial)
         return None
+
+    def add_set_on_phone_actions(
+        self, menu: QMenu, choose: Callable[[FolderPanel, list[str]], None]
+    ) -> None:
+        """Fill *menu* with "As ringtone…", "As notification sound…", "As alarm…" (with a SIM
+        submenu on dual-SIM phones). Every entry still asks for confirmation when chosen."""
+        if self.device() is None:
+            menu.addAction("Connect your phone first").setEnabled(False)
+            return
+        for panel in self.folder_panels:
+            if not panel.keys:
+                menu.addAction(f"As {panel.sound_name}: still loading…").setEnabled(False)
+            elif len(panel.keys) == 1:
+                panel.add_slot_actions(menu, lambda keys, p=panel: choose(p, keys))
+            else:
+                sub = menu.addMenu(f"As {panel.sound_name}")
+                panel.add_slot_actions(sub, lambda keys, p=panel: choose(p, keys))
+
+    def confirm_send_and_set(self, panel: FolderPanel, keys: list[str], name: str) -> bool:
+        question = (
+            f"Send “{name}” to the phone's {panel.folder} folder and make it your "
+            f"{panel.sound_name}?\n\n"
+            + panel.change_lines(keys, name)
+            + f"\n\nYou can undo the change on the {panel.folder} tab."
+        )
+        return _message(self, f"Set {panel.sound_name}", question, ask=True)
 
     def refresh_panels(self) -> None:
         for panel in self.panels:
@@ -508,9 +622,11 @@ class MainWindow(QMainWindow):
         current = self.device()
         if (current.serial if current else None) != prev_serial:
             self.refresh_panels()
+            self._check_phone_app()
         for d in ready:
             if d.serial not in self.names:
                 self._fetch_name(d.serial)
+        self._update_top_buttons()
 
     def _run_maintenance(self, serial: str) -> None:
         dev, journal = adb.AdbDevice(serial), self.journal
@@ -538,6 +654,177 @@ class MainWindow(QMainWindow):
                     self.device_combo.setItemText(i, self._label(d))
 
         self.runner.submit(lambda: adb.AdbDevice(serial).friendly_name(), done, lambda _: None)
+
+    # ------------------------------------------------------------------ phone app
+
+    def _check_phone_app(self) -> None:
+        dev = self.device()
+        if dev is None or not companion.available():
+            return
+
+        def done(version):
+            self._app_version = (dev.serial, version)
+            self._update_top_buttons()
+
+        self.runner.submit(lambda: companion.installed_version(dev), done, lambda _exc: None)
+
+    def install_phone_app(self) -> None:
+        dev = self.device()
+        if dev is None or self._app_busy:
+            return
+        self._app_source = companion.source_version()
+        src, installed = self._app_source, self._installed_app(dev)
+        build_first = companion.needs_build()
+        new = src.name if src else "the latest version"
+        if installed and src and installed.code >= src.code and not build_first:
+            question = (
+                f"The phone already has the latest phone app ({installed.name}). "
+                "Install it again anyway?"
+            )
+        elif installed:
+            question = (
+                f"Update Sound Manager on the phone from {installed.name} to {new}?\n\n"
+                "Your sounds, settings and the app's permissions stay as they are."
+            )
+        else:
+            question = (
+                f"Install Sound Manager {new} on the phone?\n\nOpen it on the phone afterwards; "
+                "it asks for each permission it needs itself."
+            )
+        if build_first:
+            question += (
+                "\n\nIt's built from the source on this PC first. That takes a minute or two "
+                "and keeps the computer busy meanwhile."
+            )
+        if not _message(self, "Phone app", question, ask=True):
+            return
+
+        def work():
+            apk = companion.build() if build_first else companion.ANDROID_DIR / companion.APK_PATH
+            companion.install(dev, apk)
+            return apk
+
+        def failed(exc):
+            if not isinstance(exc, companion.SignatureMismatch):
+                self.show_error(exc)
+                return
+            question = (
+                f"{exc}\n\nUninstall the phone's copy and install this one? You'll need to allow "
+                "its permissions again (audio files, contacts, modify system settings). Your "
+                "sounds, default sounds and contact ringtones are not affected."
+            )
+            if _message(self, "Phone app", question, ask=True):
+                apk = companion.ANDROID_DIR / companion.APK_PATH
+                self._phone_app_task(lambda: companion.reinstall(dev, apk), "Reinstalling")
+
+        self._phone_app_task(
+            work, "Building and installing" if build_first else "Installing", failed
+        )
+
+    def _phone_app_task(self, work, doing: str, on_error=None) -> None:
+        self._app_busy = True
+        self._update_top_buttons()
+        self.status(f"{doing} the phone app…", 0)
+
+        def finish():
+            self._app_busy = False
+            self.statusBar().clearMessage()
+            self._check_phone_app()
+            self._update_top_buttons()
+
+        def done(_):
+            finish()
+            self.status("The phone app is installed and up to date.")
+
+        def failed(exc):
+            finish()
+            (on_error or self.show_error)(exc)
+
+        self.media_runner.submit(work, done, failed)
+
+    # ------------------------------------------------------------------ backup and restore
+
+    def backup_phone(self) -> None:
+        dev = self.device()
+        if dev is None or self.runner.busy:
+            return
+        start = Path.home() / "Documents" / backup.default_backup_name()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Back up phone sounds", str(start), "Sound Manager backup (*.zip)"
+        )
+        if not path:
+            return
+        dest = Path(path)
+        if dest.suffix.lower() != ".zip":
+            dest = dest.with_name(dest.name + ".zip")
+        self.status("Backing up the phone… (copying every sound)", 0)
+
+        def done(summary: backup.BackupSummary):
+            self.statusBar().clearMessage()
+            text = (
+                f"Saved {summary.files} sound(s) ({human_size(summary.bytes)}), "
+                f"{summary.defaults} default sound(s) and {summary.contacts} contact "
+                f"ringtone(s) to:\n\n{dest}\n\n"
+                "The file includes the names of contacts that have their own ringtone (never "
+                "phone numbers), so keep it somewhere private."
+            )
+            if summary.skipped_defaults or summary.skipped_contacts:
+                text += (
+                    "\n\nSettings that use the phone's built-in sounds or files outside the "
+                    "Ringtones, Notifications and Alarms folders aren't included."
+                )
+            _message(self, "Backup saved", text)
+
+        self.runner.submit(lambda: backup.create_backup(dev, dest), done, self._task_failed)
+
+    def restore_phone(self) -> None:
+        dev = self.device()
+        if dev is None or self.runner.busy:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Restore a backup", str(Path.home() / "Documents"), "Sound Manager backup (*.zip)"
+        )
+        if not path:
+            return
+        source = Path(path)
+        self.status("Reading the backup…", 0)
+
+        def plan_work():
+            with backup.open_backup(source) as zf:
+                manifest = backup.read_manifest(zf)
+            return backup.plan_restore(dev, manifest)
+
+        def planned(plan: backup.RestorePlan):
+            self.statusBar().clearMessage()
+            if plan.is_empty():
+                _message(self, "Restore", "The phone already has everything in this backup.")
+                return
+            question = "Restore this backup to the phone?\n\n" + backup.describe_plan(plan)
+            question += "\n\nNo sound already on the phone is replaced."
+            if not _message(self, "Restore", question, ask=True):
+                return
+            self.status("Restoring…", 0)
+
+            def done(_):
+                self.statusBar().clearMessage()
+                self.status("Backup restored.")
+                self.refresh_panels()
+
+            self.runner.submit(
+                lambda: backup.restore(dev, source, plan, self.journal), done, self._task_failed
+            )
+
+        self.runner.submit(plan_work, planned, self._task_failed)
+
+    def _task_failed(self, exc: BaseException) -> None:
+        self.statusBar().clearMessage()
+        self.show_error(exc)
+        if adb.is_disconnect_error(exc):
+            self.status(
+                "Phone disconnected. Nothing was left half-written; run it again once the phone "
+                "is back to finish.",
+                0,
+            )
 
     def closeEvent(self, event) -> None:
         self.poll_timer.stop()

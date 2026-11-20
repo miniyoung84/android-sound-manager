@@ -8,8 +8,9 @@ USB-connected Android phone, from both the desktop and the phone.
 > **Status:** early development. The desktop app can download audio from YouTube, extract
 > audio from videos, keep a local sound library, manage the phone's sound folders, set the
 > default ringtone, notification, and alarm sounds, set per-contact ringtones, trim/fade
-> sounds in a waveform editor, and show every app's notification categories. The Android phone
-> app lists, adds, edits, and deletes sounds and sets defaults and contact ringtones.
+> sounds in a waveform editor, show every app's notification categories, back up and restore
+> the phone's sounds, and install or update the phone app. The Android phone app lists, adds,
+> edits, and deletes sounds and sets defaults and contact ringtones.
 
 ## Features
 
@@ -27,6 +28,9 @@ USB-connected Android phone, from both the desktop and the phone.
 | ✅ | App sounds: every app's notification categories, the sound each plays, one click to open it on the phone | Desktop + phone |
 | ✅ | Phone app: browse, preview, and set default sounds; per-contact ringtones | Phone app |
 | ✅ | Phone app: add any audio or video file (or Share one to it from any app), edit a copy (trim, fade, volume, normalize), delete to trash | Phone app |
+| ✅ | Save (or send) and set as ringtone / notification / alarm in one step, always with a confirmation | Desktop + phone app |
+| ✅ | Back up the phone's sounds, default sounds, and contact ringtones to one file; restore it to any phone | Desktop |
+| ✅ | Install or update the phone app from the desktop (builds it from this repo if needed) | Desktop |
 
 ✅ done · 🧩 backend only · ⏳ planned
 
@@ -50,8 +54,17 @@ select it with one tap.
 - **Downloads and imports:** only http(s) links, one video per link, size and length limits,
   partial downloads kept in a temp folder, ffmpeg inputs forced to local files, and phone file
   names sanitized before they are saved on Windows. Imports never overwrite library files.
-- **Privacy:** contact names stay in memory for display; phone numbers are never read. A
-  pre-commit hook blocks emails, tokens, and anything in your local `.private-patterns` file.
+- **Privacy:** contact names stay in memory for display; phone numbers are never read. The
+  one exception is a backup you choose to make: it includes the names of contacts that have
+  their own ringtone (so they can be matched on a new phone), never their numbers. A pre-commit
+  hook blocks emails, tokens, and anything in your local `.private-patterns` file.
+- **Backups:** restoring treats the file as untrusted. Names, folders, sizes, and setting keys
+  are checked; sounds only go into the three sound folders and never replace a different file
+  with the same name; nothing changes until you've seen the plan and agreed. Every step is safe
+  to repeat, so a restore cut short by a disconnect can simply be run again.
+- **Phone app installs:** `adb install -r` with the APK built from this repo. It never grants
+  permissions or downgrades; if the phone's copy was signed elsewhere you're asked before it is
+  uninstalled.
 
 ## TODO
 
@@ -80,7 +93,8 @@ Roughly in build order. Check items off as they land.
       conversation IDs from ADB, so the final pick happens on the phone)
 - [ ] Companion app: jump straight to one conversation's sound setting (needs the conversation ID,
       which only an on-phone notification listener can see)
-- [x] Never read phone numbers; never write contact names to logs, files, or the repo
+- [x] Never read phone numbers; never write contact names to logs, files, or the repo (only a
+      backup you choose to make holds them, to match contacts on a new phone)
 
 ### Milestone 3: Import
 - [x] Import tab: paste a YouTube URL and download the audio, with a progress bar and Cancel
@@ -97,7 +111,8 @@ Roughly in build order. Check items off as they land.
 - [x] Save as `.m4a` / `.mp3` / `.ogg` into the library (originals are never changed)
 - [x] Undo/redo for edits (Ctrl+Z / Ctrl+Y)
 - [ ] Zoom in on the waveform for precise edits in long files
-- [ ] "Save and set as ringtone / notification / alarm" in one step
+- [x] "Save and set as ringtone / notification / alarm" in one step (desktop editor, library
+      "Send and set as", and the phone editor), always confirmed first
 
 ### Milestone 5: Android companion app
 - [x] Create the Kotlin + Jetpack Compose project in `android/`
@@ -118,7 +133,13 @@ Roughly in build order. Check items off as they land.
 ### Milestone 6: Desktop + phone together
 - [x] Desktop App sounds tab: every app's notification categories with their current sound;
   opens the exact category's settings on the phone (Android doesn't let other apps change it)
-- [ ] Install or update the companion APK from the desktop (`adb install`)
+- [x] Install or update the phone app from the desktop: shows the phone's version, builds the
+      APK from this repo when the source changed (low priority, no Gradle daemon left running),
+      then `adb install -r`
+- [x] Back up the phone's sounds, defaults, and contact ringtones to one `.zip`; restore it to the
+      same or a new phone (contacts matched by name, nothing replaced, safe to re-run)
+- [ ] Permanent signing key for the phone app (kept out of the repo) so updates keep working
+      from any PC
 - [ ] Wireless ADB pairing as an alternative to USB
 
 ### Later / maybe
@@ -127,7 +148,6 @@ Roughly in build order. Check items off as they land.
 - [ ] Investigate `NotificationListenerService.updateNotificationChannel` (companion-device
       loophole) for setting other apps' notification sounds directly
 - [ ] Standalone `.exe` build with PyInstaller for sharing
-- [ ] Back up and restore all custom sounds and assignments
 - [x] CI: lint, tests, and secret scanning (gitleaks) on GitHub Actions; Dependabot updates
 
 ## Requirements
@@ -190,6 +210,8 @@ src/soundmanager/
   adb.py          Device discovery and file transfer over ADB
   phone_sounds.py Read and set default ringtone / notification / alarm sounds
   phone_contacts.py  Read and set per-contact ringtones
+  backup.py       Back up and restore the phone's sounds and sound settings
+  companion.py    Build and install the phone app from android/
   journal.py      Write-ahead journal that repairs changes interrupted by a disconnect
   audio.py        ffmpeg-based extraction and editing
   library.py      Local sound library (import, list)

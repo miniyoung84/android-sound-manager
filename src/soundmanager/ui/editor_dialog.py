@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QVBoxLayout,
 )
@@ -31,7 +33,7 @@ from ..adb import safe_local_name, unique_path
 from .waveform import WaveformView
 
 if TYPE_CHECKING:
-    from .main_window import MainWindow
+    from .main_window import FolderPanel, MainWindow
 
 OUTPUT_FORMATS = (".m4a", ".mp3", ".ogg")
 TIP = (
@@ -180,7 +182,12 @@ class EditorDialog(QDialog):
         cancel.clicked.connect(self.reject)
         self.save_button = QPushButton("Save to library")
         self.save_button.setDefault(True)
-        self.save_button.clicked.connect(self.save)
+        self.save_button.clicked.connect(lambda: self.save())
+        # Saves to the library, sends it to the phone, and sets it: menu, then confirmation.
+        self.save_set_button = QPushButton("Save and set on phone")
+        self.save_set_menu = QMenu(self)
+        self.save_set_menu.aboutToShow.connect(self._build_save_set_menu)
+        self.save_set_button.setMenu(self.save_set_menu)
         save_row = QHBoxLayout()
         save_row.addWidget(QLabel("Save as"))
         save_row.addWidget(self.name_edit, 1)
@@ -190,6 +197,7 @@ class EditorDialog(QDialog):
         save_row.addWidget(self.redo_button)
         save_row.addSpacing(16)
         save_row.addWidget(cancel)
+        save_row.addWidget(self.save_set_button)
         save_row.addWidget(self.save_button)
 
         tip = QLabel(TIP + "  The original file is never changed.")
@@ -222,6 +230,7 @@ class EditorDialog(QDialog):
             self.normalize_box,
             self.preview_button,
             self.save_button,
+            self.save_set_button,
         ):
             w.setEnabled(enabled)
         self._update_undo_buttons()
@@ -383,7 +392,17 @@ class EditorDialog(QDialog):
         name = safe_local_name(self.name_edit.text().strip()) or safe_local_name(self.source.stem)
         return unique_path(self.library_dir / f"{name}{self.format_combo.currentData()}")
 
-    def save(self) -> None:
+    def _build_save_set_menu(self) -> None:
+        self.save_set_menu.clear()
+        self.main.add_set_on_phone_actions(self.save_set_menu, self._save_and_set)
+
+    def _save_and_set(self, panel: FolderPanel, keys: list[str]) -> None:
+        name = self.output_path().name
+        if self._loading or not self.main.confirm_send_and_set(panel, keys, name):
+            return
+        self.save(after=lambda path: panel.send_and_set(path, keys))
+
+    def save(self, after: Callable[[Path], None] | None = None) -> None:
         if self._loading:
             return
         state, src = self._read(), self.source
@@ -402,6 +421,8 @@ class EditorDialog(QDialog):
         def done(path: Path):
             self.saved_path = path
             self.accept()
+            if after is not None:
+                after(path)
 
         def failed(exc):
             self._set_enabled(True)
