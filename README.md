@@ -1,6 +1,6 @@
 # Sound Manager by The Bakery
 
-<img src="branding/bakery_logo.svg" alt="Sound Manager logo: a loaf of bread scored like a sound wave" width="96" align="right">
+<img src="branding/bakery_logo.svg" alt="Sound Manager logo: a strawberry cake whose candles rise and fall like a sound wave" width="96" align="right">
 
 Edit sounds on your PC and manage the ringtones, notification sounds, and alarm sounds on a
 USB-connected Android phone, from both the desktop and the phone.
