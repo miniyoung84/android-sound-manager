@@ -1,4 +1,4 @@
-# Android companion app
+# Sound Manager by The Bakery: Android app
 
 Kotlin + Jetpack Compose app that manages sounds on the phone itself.
 
@@ -10,8 +10,10 @@ Kotlin + Jetpack Compose app that manages sounds on the phone itself.
   "Modify system settings" (the app explains why first).
 - **Contacts tab:** search contacts, pick a ringtone for one (preview while choosing), confirm,
   and undo. A "Message sound" button opens Settings > Conversations.
-- **Fold layout:** on the inner screen (600 dp and wider) the list and details sit side by side;
-  on the cover screen they are shown one at a time with a back button.
+- **Fold layout:** on the inner screen (600 dp and wider) a side navigation rail plus list and
+  details side by side; on the cover screen a bottom navigation bar and one pane at a time.
+- **Look:** The Bakery palette (golden crust, cream, cocoa, strawberry) in light and dark mode,
+  rounded cards, and the loaf-and-sound-wave logo (adaptive and themed launcher icons).
 
 ## Privacy and security
 

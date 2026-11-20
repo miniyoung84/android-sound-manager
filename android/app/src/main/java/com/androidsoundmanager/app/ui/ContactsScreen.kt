@@ -1,40 +1,39 @@
 package com.androidsoundmanager.app.ui
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.androidsoundmanager.app.data.Contact
 import com.androidsoundmanager.app.data.ContactRepository
@@ -115,55 +115,50 @@ fun ContactsScreen() {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val twoPane = maxWidth >= TwoPaneWidth
         val list = @Composable { modifier: Modifier ->
-            Column(modifier) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search contacts") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                )
+            LazyColumn(
+                modifier,
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item(key = "search") {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Search contacts") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (undo != null) {
-                    TextButton(onClick = undoLast, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text("Undo last change")
+                    item(key = "undo") {
+                        TextButton(onClick = undoLast) { Text("Undo last change") }
                     }
                 }
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(filtered, key = { it.id }) { c ->
-                        ListItem(
-                            headlineContent = { Text(c.name) },
-                            supportingContent = c.ringtone?.let { uri ->
-                                { Text(byUri[uri]?.title ?: "Custom ringtone") }
-                            },
-                            trailingContent = {
-                                if (c.ringtone != null) Icon(Icons.Filled.MusicNote, "Has a custom ringtone")
-                            },
-                            colors = if (c.id == selected?.id) {
-                                ListItemDefaults.colors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                )
-                            } else {
-                                ListItemDefaults.colors()
-                            },
-                            modifier = Modifier.clickable { selected = c },
-                        )
-                        HorizontalDivider()
-                    }
+                items(filtered, key = { it.id }) { c ->
+                    RowCard(
+                        selected = c.id == selected?.id,
+                        onClick = { selected = c },
+                        leading = { InitialAvatar(c.name) },
+                        title = c.name,
+                        subtitle = c.ringtone?.let { "♪ " + (byUri[it]?.title ?: "Custom ringtone") },
+                        trailing = if (c.ringtone != null) ({ Pill("Custom") }) else null,
+                    )
                 }
             }
         }
-        val detail = @Composable { c: Contact, modifier: Modifier, onBack: (() -> Unit)? ->
-            ContactDetail(c, ringtones, byUri, player, modifier, onBack, apply) {
+        val detail = @Composable { c: Contact, onBack: (() -> Unit)? ->
+            ContactDetail(c, ringtones, byUri, player, onBack, apply) {
                 openConversationSettings(context) { message = it }
             }
         }
         if (twoPane) {
             Row(Modifier.fillMaxSize()) {
                 list(Modifier.weight(1f))
-                VerticalDivider()
-                Box(Modifier.weight(1f)) {
-                    selected?.let { detail(it, Modifier.fillMaxSize(), null) }
-                        ?: EmptyDetail("Pick a contact to give them their own ringtone.")
+                Box(Modifier.weight(1f).fillMaxSize().padding(end = 16.dp, bottom = 16.dp)) {
+                    selected?.let { detail(it, null) }
+                        ?: EmptyState("Pick a contact to give them their own ringtone.")
                 }
             }
         } else {
@@ -172,7 +167,7 @@ fun ContactsScreen() {
                 list(Modifier.fillMaxSize())
             } else {
                 BackHandler { selected = null }
-                detail(sel, Modifier.fillMaxSize()) { selected = null }
+                detail(sel) { selected = null }
             }
         }
     }
@@ -192,7 +187,6 @@ private fun ContactDetail(
     ringtones: List<Sound>,
     byUri: Map<String, Sound>,
     player: PreviewPlayer,
-    modifier: Modifier,
     onBack: (() -> Unit)?,
     onApply: (Contact, Sound?) -> Unit,
     onMessageSound: () -> Unit,
@@ -203,40 +197,101 @@ private fun ContactDetail(
     val currentLabel = contact.ringtone?.let { byUri[it]?.title ?: "Custom ringtone" }
         ?: "Phone default"
 
-    Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         if (onBack != null) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            item(key = "back") {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                }
             }
         }
-        Text(contact.name, style = MaterialTheme.typography.headlineSmall)
-        Text("Ringtone now: $currentLabel", style = MaterialTheme.typography.bodyMedium)
-
-        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 480.dp)) {
-            item { ChoiceRow("Phone default", choice == null, onClick = { choice = null }) }
-            items(ringtones, key = { it.id }) { s ->
-                ChoiceRow(
-                    s.title,
-                    choice?.id == s.id,
-                    onClick = { choice = s; player.toggle(s.uri) },
-                )
+        item(key = "header") {
+            Card(
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    InitialAvatar(contact.name)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            contact.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "Ringtone: $currentLabel",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { confirm = true },
-                enabled = choice?.uri?.toString() != contact.ringtone,
-            ) { Text("Apply…") }
-            OutlinedButton(onClick = { player.stop() }) { Text("Stop preview") }
+        item(key = "choose") {
+            Text("Choose a ringtone", style = MaterialTheme.typography.titleMedium)
         }
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        Text("Message sound", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Android keeps each conversation's sound in the messaging app's settings. This opens " +
-                "your conversations list: tap ${contact.name}, then Sound.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        OutlinedButton(onClick = onMessageSound) { Text("Open conversation settings") }
+        item(key = "choices") {
+            Card(
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            ) {
+                Column(Modifier.padding(vertical = 6.dp)) {
+                    ChoiceRow("Phone default", choice == null) { choice = null; player.stop() }
+                    ringtones.forEach { s ->
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                        ChoiceRow(s.title, choice?.id == s.id) {
+                            choice = s
+                            player.toggle(s.uri)
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "actions") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { confirm = true },
+                    enabled = choice?.uri?.toString() != contact.ringtone,
+                ) { Text("Apply…") }
+                OutlinedButton(onClick = { player.stop() }) { Text("Stop preview") }
+            }
+        }
+        item(key = "message") {
+            Card(
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Message sound", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Android keeps each conversation's sound in your messaging app's " +
+                            "settings. This opens your conversations: tap ${contact.name}, then Sound.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(onClick = onMessageSound) { Text("Open conversation settings") }
+                }
+            }
+        }
     }
 
     if (confirm) {
@@ -257,18 +312,26 @@ private fun ContactDetail(
 @Composable
 private fun ChoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().selectable(selected = selected, onClick = onClick).padding(8.dp),
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = null)
-        Text(label, Modifier.padding(start = 8.dp))
+        Text(
+            label,
+            Modifier.padding(start = 12.dp),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 /** Settings > Notifications > Conversations. Not a public SDK constant, but present since 11. */
 private const val ACTION_CONVERSATION_SETTINGS = "android.settings.CONVERSATION_SETTINGS"
 
-private fun openConversationSettings(context: android.content.Context, onError: (String) -> Unit) {
+private fun openConversationSettings(context: Context, onError: (String) -> Unit) {
     val actions = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add(ACTION_CONVERSATION_SETTINGS)
         add(Settings.ACTION_SOUND_SETTINGS)

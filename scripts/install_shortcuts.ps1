@@ -9,7 +9,7 @@ param([switch]$Remove)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$name = 'Android Sound Manager'
+$name = 'Sound Manager by The Bakery'
 $appId = 'ChaseChoi.AndroidSoundManager'   # must match APP_ID in src/soundmanager/__main__.py
 
 $targets = @(

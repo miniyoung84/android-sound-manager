@@ -45,7 +45,7 @@ def main() -> int:
     from .ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Android Sound Manager")
+    app.setApplicationName("Sound Manager by The Bakery")
     icon_path = ASSETS / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))

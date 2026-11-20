@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- Sound Manager by The Bakery: a pan loaf whose scoring marks are a sound wave.
+       Master artwork; the Android vector drawables and the desktop icon use the same shapes. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE9C9"/>
+      <stop offset="1" stop-color="#F2B676"/>
+    </linearGradient>
+    <linearGradient id="crust" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D98B42"/>
+      <stop offset="1" stop-color="#A9571F"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EDB574"/>
+      <stop offset="1" stop-color="#CF8A44"/>
+    </linearGradient>
+  </defs>
+  <rect id="background" width="108" height="108" rx="24" fill="url(#bg)"/>
+  <!-- shadow -->
+  <ellipse cx="54" cy="79" rx="26" ry="3" fill="#8A4A1C" fill-opacity="0.22"/>
+  <!-- loaf body (the part that baked inside the pan) -->
+  <path d="M29,59 L79,59 L77.2,74 Q76.8,77 73.8,77 L34.2,77 Q31.2,77 30.8,74 Z" fill="url(#side)"/>
+  <!-- crust top, overhanging the pan -->
+  <path d="M21,56.5 C21,41.5 35.5,32 54,32 C72.5,32 87,41.5 87,56.5 C87,60.3 84.3,62.5 80.5,62.5 L27.5,62.5 C23.7,62.5 21,60.3 21,56.5 Z"
+        fill="url(#crust)"/>
+  <!-- crust shine -->
+  <path d="M28,48 C31,40.5 41,36 54,36 C63,36 70,38.2 74.5,42 C68,39.6 61.5,38.8 54,38.8 C42,38.8 32.5,42 28,48 Z"
+        fill="#FFF3DF" fill-opacity="0.38"/>
+  <!-- scoring marks = sound wave -->
+  <g fill="#FFF3E2">
+    <rect x="37.8" y="45" width="4.4" height="8" rx="2.2"/>
+    <rect x="44.8" y="42" width="4.4" height="14" rx="2.2"/>
+    <rect x="51.8" y="39.5" width="4.4" height="19" rx="2.2"/>
+    <rect x="58.8" y="42.5" width="4.4" height="13" rx="2.2"/>
+    <rect x="65.8" y="45" width="4.4" height="8" rx="2.2"/>
+  </g>
+</svg>

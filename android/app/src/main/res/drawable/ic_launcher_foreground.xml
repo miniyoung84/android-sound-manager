@@ -1,14 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Same waveform-bars design as the desktop icon. 108dp canvas, art inside the 66dp safe zone. -->
+<!-- The Bakery loaf (branding/bakery_logo.svg), scaled to sit inside the adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:pathData="M30,49.5a3,3 0,0 1,6 0v9a3,3 0,0 1,-6 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M38,44a3,3 0,0 1,6 0v20a3,3 0,0 1,-6 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M46,37a3,3 0,0 1,6 0v34a3,3 0,0 1,-6 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M54,42a3,3 0,0 1,6 0v24a3,3 0,0 1,-6 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M62,34a3,3 0,0 1,6 0v40a3,3 0,0 1,-6 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M70,45a3,3 0,0 1,6 0v18a3,3 0,0 1,-6 0z" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.86"
+        android:scaleY="0.86">
+        <path
+            android:fillColor="#8A4A1C"
+            android:fillAlpha="0.22"
+            android:pathData="M28,79a26,3 0,1 0,52 0a26,3 0,1 0,-52 0z" />
+        <path android:pathData="M29,59 L79,59 L77.2,74 Q76.8,77 73.8,77 L34.2,77 Q31.2,77 30.8,74 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="0"
+                    android:startY="59"
+                    android:endX="0"
+                    android:endY="77">
+                    <item android:offset="0" android:color="#FFEDB574" />
+                    <item android:offset="1" android:color="#FFCF8A44" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M21,56.5 C21,41.5 35.5,32 54,32 C72.5,32 87,41.5 87,56.5 C87,60.3 84.3,62.5 80.5,62.5 L27.5,62.5 C23.7,62.5 21,60.3 21,56.5 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="0"
+                    android:startY="32"
+                    android:endX="0"
+                    android:endY="62.5">
+                    <item android:offset="0" android:color="#FFD98B42" />
+                    <item android:offset="1" android:color="#FFA9571F" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:fillColor="#FFF3DF"
+            android:fillAlpha="0.38"
+            android:pathData="M28,48 C31,40.5 41,36 54,36 C63,36 70,38.2 74.5,42 C68,39.6 61.5,38.8 54,38.8 C42,38.8 32.5,42 28,48 Z" />
+        <path
+            android:fillColor="#FFF3E2"
+            android:pathData="M40,45h0a2.2,2.2 0,0 1,2.2 2.2v3.6a2.2,2.2 0,0 1,-4.4 0v-3.6a2.2,2.2 0,0 1,2.2 -2.2z M47,42h0a2.2,2.2 0,0 1,2.2 2.2v9.6a2.2,2.2 0,0 1,-4.4 0v-9.6a2.2,2.2 0,0 1,2.2 -2.2z M54,39.5h0a2.2,2.2 0,0 1,2.2 2.2v14.6a2.2,2.2 0,0 1,-4.4 0v-14.6a2.2,2.2 0,0 1,2.2 -2.2z M61,42.5h0a2.2,2.2 0,0 1,2.2 2.2v8.6a2.2,2.2 0,0 1,-4.4 0v-8.6a2.2,2.2 0,0 1,2.2 -2.2z M68,45h0a2.2,2.2 0,0 1,2.2 2.2v3.6a2.2,2.2 0,0 1,-4.4 0v-3.6a2.2,2.2 0,0 1,2.2 -2.2z" />
+    </group>
 </vector>

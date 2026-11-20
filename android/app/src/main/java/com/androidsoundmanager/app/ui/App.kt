@@ -7,17 +7,32 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.material.icons.rounded.Contacts
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -27,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -40,32 +56,85 @@ private val audioPermission =
 private fun granted(context: Context, permission: String) =
     ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
-private val tabs = listOf("Ringtones", "Notifications", "Alarms", "Contacts")
+private data class Destination(val label: String, val icon: ImageVector)
+
+private val destinations = listOf(
+    Destination("Ringtones", Icons.Rounded.MusicNote),
+    Destination("Notifications", Icons.Rounded.NotificationsActive),
+    Destination("Alarms", Icons.Rounded.Alarm),
+    Destination("Contacts", Icons.Rounded.Contacts),
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("Sound Manager") }) },
-    ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            PrimaryTabRow(selectedTabIndex = tab) {
-                tabs.forEachIndexed { i, title ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Inner screen of the Fold (and tablets): navigation rail on the side.
+        // Cover screen (and phones): navigation bar at the bottom.
+        val wide = maxWidth >= TwoPaneWidth
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { BrandTitle(showLogo = !wide) },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                )
+            },
+            bottomBar = {
+                if (!wide) {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                        destinations.forEachIndexed { i, d ->
+                            NavigationBarItem(
+                                selected = tab == i,
+                                onClick = { tab = i },
+                                icon = { Icon(d.icon, contentDescription = null) },
+                                label = { Text(d.label, maxLines = 1) },
+                            )
+                        }
+                    }
                 }
-            }
-            when (tab) {
-                0 -> PermissionGate(audioPermission, AUDIO_REASON) { SoundsScreen(SoundType.RINGTONE) }
-                1 -> PermissionGate(audioPermission, AUDIO_REASON) { SoundsScreen(SoundType.NOTIFICATION) }
-                2 -> PermissionGate(audioPermission, AUDIO_REASON) { SoundsScreen(SoundType.ALARM) }
-                else -> PermissionGate(Manifest.permission.WRITE_CONTACTS, CONTACTS_REASON) {
-                    PermissionGate(audioPermission, AUDIO_REASON) { ContactsScreen() }
+            },
+        ) { padding ->
+            Row(Modifier.padding(padding).fillMaxSize()) {
+                if (wide) {
+                    NavigationRail(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        header = {
+                            BakeryLogo(48.dp, Modifier.padding(top = 4.dp, bottom = 12.dp))
+                        },
+                    ) {
+                        Spacer(Modifier.height(8.dp))
+                        destinations.forEachIndexed { i, d ->
+                            NavigationRailItem(
+                                selected = tab == i,
+                                onClick = { tab = i },
+                                icon = { Icon(d.icon, contentDescription = null) },
+                                label = { Text(d.label, maxLines = 1) },
+                            )
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxSize()) {
+                    when (tab) {
+                        0 -> AudioGate { SoundsScreen(SoundType.RINGTONE) }
+                        1 -> AudioGate { SoundsScreen(SoundType.NOTIFICATION) }
+                        2 -> AudioGate { SoundsScreen(SoundType.ALARM) }
+                        else -> PermissionGate(Manifest.permission.WRITE_CONTACTS, CONTACTS_REASON) {
+                            AudioGate { ContactsScreen() }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun AudioGate(content: @Composable () -> Unit) =
+    PermissionGate(audioPermission, AUDIO_REASON, content)
 
 private const val AUDIO_REASON =
     "To list the sounds in your Ringtones, Notifications and Alarms folders, Sound Manager needs " +
@@ -79,7 +148,7 @@ private const val CONTACTS_REASON =
 fun PermissionGate(permission: String, reason: String, content: @Composable () -> Unit) {
     val context = LocalContext.current
     var ok by remember(permission) { mutableStateOf(granted(context, permission)) }
-    val extra = if (permission == Manifest.permission.WRITE_CONTACTS) {
+    val request = if (permission == Manifest.permission.WRITE_CONTACTS) {
         arrayOf(Manifest.permission.READ_CONTACTS, permission)
     } else {
         arrayOf(permission)
@@ -93,11 +162,17 @@ fun PermissionGate(permission: String, reason: String, content: @Composable () -
     } else {
         Column(
             Modifier.fillMaxSize().padding(32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(reason, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
-            Button(onClick = { launcher.launch(extra) }) { Text("Allow access") }
+            BakeryLogo(96.dp)
+            Text(
+                reason,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 420.dp),
+            )
+            Button(onClick = { launcher.launch(request) }) { Text("Allow access") }
         }
     }
 }

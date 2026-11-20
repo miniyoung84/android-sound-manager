@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 HANDLE_GRAB_PX = 7
-ACCENT = QColor("#3b9cff")  # readable on both light and dark backgrounds
+ACCENT = QColor("#E39A4F")  # The Bakery golden crust; readable on light and dark backgrounds
 MIN_SELECTION_S = 0.1
 
 

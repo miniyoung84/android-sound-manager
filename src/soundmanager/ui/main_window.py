@@ -349,7 +349,7 @@ class FolderPanel(PhonePanel):
 class MainWindow(QMainWindow):
     def __init__(self, journal: Journal | None = None, library_dir: Path | None = None):
         super().__init__()
-        self.setWindowTitle("Android Sound Manager")
+        self.setWindowTitle("Sound Manager by The Bakery")
         self.resize(1080, 660)
         self.devices: list[adb.Device] = []
         self.names: dict[str, str] = {}  # serial -> friendly name (in memory only, never logged)
