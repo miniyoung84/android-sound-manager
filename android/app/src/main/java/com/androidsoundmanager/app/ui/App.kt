@@ -3,6 +3,7 @@ package com.androidsoundmanager.app.ui
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -31,9 +33,11 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +51,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.androidsoundmanager.app.data.SoundRepository
 import com.androidsoundmanager.app.data.SoundType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val audioPermission =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO
@@ -65,10 +72,30 @@ private val destinations = listOf(
     Destination("Contacts", Icons.Rounded.Contacts),
 )
 
+/** Tabs 0-2 show these folders, in this order. */
+private val soundTabs = listOf(SoundType.RINGTONE, SoundType.NOTIFICATION, SoundType.ALARM)
+
+/**
+ * The whole app. [shared] is a file another app shared with us: it opens in the editor on top
+ * of everything (no permission needed to edit it), and [onShareClosed] is told whether it was
+ * saved.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App() {
+fun App(shared: Uri? = null, onShareClosed: (saved: Boolean) -> Unit = {}) {
+    val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var shareSource by remember { mutableStateOf<EditorSource?>(null) }
+    var savedId by remember { mutableStateOf<Long?>(null) } // select a just-saved sound
+    var message by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(shared) {
+        shareSource = shared?.let { uri ->
+            // The name comes from the other app's provider: read it off the main thread.
+            val repo = SoundRepository(context.applicationContext)
+            EditorSource(uri, withContext(Dispatchers.IO) { repo.displayTitle(uri) }, isCopy = false)
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Inner screen of the Fold (and tablets): navigation rail on the side.
@@ -119,9 +146,9 @@ fun App() {
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) {
                     when (tab) {
-                        0 -> AudioGate { SoundsScreen(SoundType.RINGTONE) }
-                        1 -> AudioGate { SoundsScreen(SoundType.NOTIFICATION) }
-                        2 -> AudioGate { SoundsScreen(SoundType.ALARM) }
+                        in soundTabs.indices -> AudioGate {
+                            SoundsScreen(soundTabs[tab], selectOnLoad = savedId) { savedId = null }
+                        }
                         else -> PermissionGate(Manifest.permission.WRITE_CONTACTS, CONTACTS_REASON) {
                             AudioGate { ContactsScreen() }
                         }
@@ -129,6 +156,32 @@ fun App() {
                 }
             }
         }
+    }
+
+    val src = shareSource
+    if (src != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        SoundEditor(
+            source = src,
+            initialType = soundTabs.getOrElse(tab) { SoundType.RINGTONE },
+            onDismiss = {
+                shareSource = null
+                onShareClosed(false)
+            },
+            onSaved = { type, id, title ->
+                shareSource = null
+                tab = soundTabs.indexOf(type)
+                savedId = id
+                message = "Saved “$title” to ${type.folder}."
+                onShareClosed(true)
+            },
+        )
+    }
+    message?.let {
+        AlertDialog(
+            onDismissRequest = { message = null },
+            confirmButton = { TextButton(onClick = { message = null }) { Text("OK") } },
+            text = { Text(it) },
+        )
     }
 }
 

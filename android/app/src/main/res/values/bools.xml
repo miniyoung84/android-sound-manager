@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Share target: off before Android 10, where the app can't save new sounds. -->
+    <bool name="share_target">false</bool>
+</resources>

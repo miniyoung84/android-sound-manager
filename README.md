@@ -26,7 +26,7 @@ USB-connected Android phone, from both the desktop and the phone.
 | ✅ | Per-contact message sounds (guided: desktop opens the right screen on the phone) | Desktop + phone |
 | ✅ | App sounds: every app's notification categories, the sound each plays, one click to open it on the phone | Desktop + phone |
 | ✅ | Phone app: browse, preview, and set default sounds; per-contact ringtones | Phone app |
-| ✅ | Phone app: add any audio or video file, edit a copy (trim, fade, volume, normalize), delete to trash | Phone app |
+| ✅ | Phone app: add any audio or video file (or Share one to it from any app), edit a copy (trim, fade, volume, normalize), delete to trash | Phone app |
 
 ✅ done · 🧩 backend only · ⏳ planned
 
@@ -110,7 +110,9 @@ Roughly in build order. Check items off as they land.
 - [x] On-phone editor: waveform, trim, fade in/out, volume or normalize, preview; saves a copy
   using the phone's own decoders and AAC encoder (device tests run the real codecs)
 - [x] Delete a sound to the phone's trash (recoverable for 30 days)
-- [ ] App sounds on the phone itself (Android only shows other apps' categories to the desktop)
+- [x] Share an audio or video file from any app (Files, Gallery, Downloads…) straight into the editor
+- ~~App sounds on the phone itself~~ Not possible: Android only shows other apps' notification
+  categories over USB (the desktop's App sounds tab), never to another app
 - [ ] Local socket server so the desktop can drive it via `adb forward`
 
 ### Milestone 6: Desktop + phone together
@@ -120,6 +122,8 @@ Roughly in build order. Check items off as they land.
 - [ ] Wireless ADB pairing as an alternative to USB
 
 ### Later / maybe
+- [ ] Share a YouTube link to the phone app to queue it; the desktop downloads it and sends it
+      over the next time the phone is plugged in (keeps the phone app offline)
 - [ ] Investigate `NotificationListenerService.updateNotificationChannel` (companion-device
       loophole) for setting other apps' notification sounds directly
 - [ ] Standalone `.exe` build with PyInstaller for sharing

@@ -73,8 +73,9 @@ val TwoPaneWidth = 600.dp
 private val canSave = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 private val canTrash = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
+/** [selectOnLoad]: a sound saved from elsewhere (a share) to open once the list has loaded. */
 @Composable
-fun SoundsScreen(type: SoundType) {
+fun SoundsScreen(type: SoundType, selectOnLoad: Long? = null, onSelectedOnLoad: () -> Unit = {}) {
     val context = LocalContext.current
     val repo = remember { SoundRepository(context.applicationContext) }
     val player = rememberPreviewPlayer()
@@ -105,6 +106,13 @@ fun SoundsScreen(type: SoundType) {
         pickFile.launch(arrayOf("audio/*", "video/*"))
     }
 
+    LaunchedEffect(selectOnLoad) {
+        if (selectOnLoad != null) {
+            selectId = selectOnLoad
+            reload++
+            onSelectedOnLoad()
+        }
+    }
     LaunchedEffect(type, reload) {
         val (list, def) = withContext(Dispatchers.IO) { repo.list(type) to repo.currentDefault(type) }
         sounds = list
@@ -172,7 +180,7 @@ fun SoundsScreen(type: SoundType) {
                         player.stop()
                         runCatching { repo.trashRequest(sound) }
                             .onSuccess { trash.launch(IntentSenderRequest.Builder(it).build()) }
-                            .onFailure { message = "Couldn't delete it: " }
+                            .onFailure { message = "Couldn't delete it: ${it.message}" }
                     }
                 } else {
                     null
@@ -208,7 +216,7 @@ fun SoundsScreen(type: SoundType) {
                     editor = null
                     if (savedType == type) selectId = id
                     reload++
-                    message = "Saved “” to ."
+                    message = "Saved “$title” to ${savedType.folder}."
                 },
             )
         }
@@ -429,10 +437,10 @@ private fun SoundDetail(
     if (confirmDelete && onDelete != null) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete your ?") },
+            title = { Text("Delete your ${type.label}?") },
             text = {
                 Text(
-                    "“” is your  right now. If you delete it, the " +
+                    "“${sound.title}” is your ${type.label} right now. If you delete it, the " +
                         "phone goes back to its built-in sound.",
                 )
             },

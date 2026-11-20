@@ -172,7 +172,7 @@ class SoundRepository(private val context: Context) {
     }
 
     fun copy(from: Uri, to: OutputStream) {
-        resolver.openInputStream(from)?.use { it.copyTo(to) }
+        resolver.openInputStream(from)?.use { copyAtMost(it, to) }
             ?: throw IOException("Couldn't read the original file.")
     }
 }
