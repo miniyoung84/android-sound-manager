@@ -1,8 +1,8 @@
 package com.androidsoundmanager.app.ui
 
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
+import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -106,7 +106,7 @@ fun SoundsScreen(type: SoundType) {
                 onGrantAccess = {
                     context.startActivity(
                         Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
-                            .setData(Uri.parse("package:${context.packageName}")),
+                            .setData("package:${context.packageName}".toUri()),
                     )
                 },
             )

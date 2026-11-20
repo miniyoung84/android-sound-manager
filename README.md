@@ -96,11 +96,12 @@ Roughly in build order. Check items off as they land.
 - [ ] "Save and set as ringtone / notification / alarm" in one step
 
 ### Milestone 5: Android companion app
-- [x] Create the Kotlin + Jetpack Compose project in `android/` (written; first build pending)
-- [ ] Build and run it on the phone for the first time (needs Android Studio)
-- [ ] Sound library screen with a two-pane layout for the Fold's inner screen (written, untested)
-- [ ] Set default ringtone / notification / alarm (`WRITE_SETTINGS` special access) (written, untested)
-- [ ] Per-contact ringtones on the phone itself (`ContactsContract.Contacts.CUSTOM_RINGTONE`) (written, untested)
+- [x] Create the Kotlin + Jetpack Compose project in `android/`
+- [x] Build, lint, and install it on the phone (also built and linted in CI)
+- [x] Sound library screen with a two-pane layout for the Fold's inner screen
+- [x] Set default ringtone / notification / alarm (`WRITE_SETTINGS` special access)
+- [x] Per-contact ringtones on the phone itself (`ContactsContract.Contacts.CUSTOM_RINGTONE`)
+- [ ] Hands-on check of every screen on the Fold (inner and cover screens)
 - [ ] List installed apps' notification categories and deep-link to each one's sound setting
 - [ ] Basic on-phone trimming (Media3 Transformer)
 - [ ] Local socket server so the desktop can drive it via `adb forward`

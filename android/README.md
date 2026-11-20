@@ -25,9 +25,23 @@ Kotlin + Jetpack Compose app that manages sounds on the phone itself.
 
 Requires Android Studio (`winget install -e --id Google.AndroidStudio --source winget`).
 
-1. Open the `android/` folder in Android Studio and let it sync. Accept any offered Gradle /
-   plugin updates; the versions in `gradle/libs.versions.toml` were current in late 2026.
-2. Plug in the phone (USB debugging on) and press Run.
+From the command line (uses Android Studio's bundled Java):
+
+```powershell
+$env:JAVA_HOME = "$env:ProgramFiles\Android\Android Studio\jbr"
+cd android
+.\gradlew.bat assembleDebug          # build
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+.\gradlew.bat --stop                 # free the Gradle daemon's memory
+```
+
+Or open the `android/` folder in Android Studio and press Run. The Gradle wrapper download is
+pinned by SHA-256, and CI validates `gradle-wrapper.jar` against official Gradle releases.
+
+Behind antivirus HTTPS scanning (e.g. Avast), Java won't trust the scanner's certificate. Point
+Gradle at a trust store containing Java's CAs plus the antivirus root in
+`%USERPROFILE%\.gradle\gradle.properties` (`systemProp.javax.net.ssl.trustStore=...`); never
+disable certificate checks.
 
 Target: Galaxy Z Fold7 (One UI 9 / Android 17, SDK 37). Minimum SDK 26 (Android 8).
 

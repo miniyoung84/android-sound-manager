@@ -265,15 +265,21 @@ private fun ChoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** Settings > Notifications > Conversations. Not a public SDK constant, but present since 11. */
+private const val ACTION_CONVERSATION_SETTINGS = "android.settings.CONVERSATION_SETTINGS"
+
 private fun openConversationSettings(context: android.content.Context, onError: (String) -> Unit) {
-    val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Settings.ACTION_CONVERSATION_SETTINGS
-    } else {
-        Settings.ACTION_SOUND_SETTINGS
+    val actions = buildList {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add(ACTION_CONVERSATION_SETTINGS)
+        add(Settings.ACTION_SOUND_SETTINGS)
     }
-    try {
-        context.startActivity(Intent(action))
-    } catch (_: ActivityNotFoundException) {
-        onError("This phone doesn't have a conversation settings screen.")
+    for (action in actions) {
+        try {
+            context.startActivity(Intent(action))
+            return
+        } catch (_: ActivityNotFoundException) {
+            // try the next, more general screen
+        }
     }
+    onError("This phone doesn't have a conversation settings screen.")
 }

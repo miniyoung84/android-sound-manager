@@ -6,7 +6,12 @@ plugins {
 
 android {
     namespace = "com.androidsoundmanager.app"
-    compileSdk = 37
+    // Compose 1.13 needs the Android 37.1 SDK to compile against (the app still runs on 26+).
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         applicationId = "com.androidsoundmanager.app"

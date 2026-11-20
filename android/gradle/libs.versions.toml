@@ -1,11 +1,11 @@
 # Versions current as of late 2026. Android Studio will offer upgrades on sync.
 [versions]
-agp = "9.4.0"
-kotlin = "2.2.21"
-composeBom = "2026.08.00"
-activityCompose = "1.11.0"
-coreKtx = "1.17.0"
-lifecycle = "2.10.0"
+agp = "9.5.1"
+kotlin = "2.4.21"
+composeBom = "2026.11.01"
+activityCompose = "1.13.0"
+coreKtx = "1.19.1"
+lifecycle = "2.11.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
