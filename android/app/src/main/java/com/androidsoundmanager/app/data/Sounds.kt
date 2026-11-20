@@ -1,13 +1,20 @@
 package com.androidsoundmanager.app.data
 
+import android.app.PendingIntent
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.provider.Settings
+import android.webkit.MimeTypeMap
+import androidx.annotation.RequiresApi
+import java.io.IOException
+import java.io.OutputStream
 
 /** The three shared folders Android's sound pickers read from. */
 enum class SoundType(val folder: String, val ringtoneType: Int, val label: String) {
@@ -95,5 +102,77 @@ class SoundRepository(private val context: Context) {
     fun setDefault(type: SoundType, sound: Sound) {
         check(canChangeDefaults()) { "Permission to modify system settings is missing" }
         RingtoneManager.setActualDefaultRingtoneUri(context, type.ringtoneType, sound.uri)
+    }
+
+    /**
+     * Saves a new sound into [type]'s folder and returns its ID. [write] fills the file.
+     *
+     * The file stays "pending" (invisible to every other app and to the sound pickers) until it
+     * is completely written, and is removed if anything fails, so an interrupted save never
+     * leaves a broken sound behind. Android picks a free name if one is taken.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun save(
+        type: SoundType,
+        title: String,
+        mimeType: String,
+        extension: String,
+        write: (OutputStream) -> Unit,
+    ): Long {
+        val values = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, "${safeFileName(title)}.$extension")
+            put(MediaStore.Audio.Media.TITLE, title.trim().ifEmpty { "Sound" })
+            put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+            put(MediaStore.Audio.Media.RELATIVE_PATH, "${type.folder}/")
+            put(MediaStore.Audio.Media.IS_PENDING, 1)
+            put(
+                when (type) {
+                    SoundType.RINGTONE -> MediaStore.Audio.Media.IS_RINGTONE
+                    SoundType.NOTIFICATION -> MediaStore.Audio.Media.IS_NOTIFICATION
+                    SoundType.ALARM -> MediaStore.Audio.Media.IS_ALARM
+                },
+                1,
+            )
+        }
+        val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = resolver.insert(collection, values)
+            ?: throw IOException("Android didn't allow a new file in ${type.folder}.")
+        try {
+            resolver.openOutputStream(uri, "w")?.use(write)
+                ?: throw IOException("Couldn't write the new file.")
+            val done = ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+        } catch (t: Throwable) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw t
+        }
+        return ContentUris.parseId(uri)
+    }
+
+    /** Asks Android to move [sound] to the trash (recoverable for 30 days) after the user agrees. */
+    @RequiresApi(Build.VERSION_CODES.R)
+    fun trashRequest(sound: Sound): PendingIntent =
+        MediaStore.createTrashRequest(resolver, listOf(sound.uri), true)
+
+    /** The file name of a picked document, without its extension (for a default title). */
+    fun displayTitle(uri: Uri): String {
+        val name = runCatching {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull() ?: return "New sound"
+        return name.substringBeforeLast('.', name).ifBlank { "New sound" }
+    }
+
+    /** MIME type and file extension of [uri], when it's a plain audio file. */
+    fun audioType(uri: Uri): Pair<String, String>? {
+        val mime = resolver.getType(uri)?.takeIf { it.startsWith("audio/") } ?: return null
+        val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: return null
+        return mime to ext
+    }
+
+    fun copy(from: Uri, to: OutputStream) {
+        resolver.openInputStream(from)?.use { it.copyTo(to) }
+            ?: throw IOException("Couldn't read the original file.")
     }
 }

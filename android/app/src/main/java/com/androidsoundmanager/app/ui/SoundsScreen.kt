@@ -1,8 +1,13 @@
 package com.androidsoundmanager.app.ui
 
+import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,17 +24,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,6 +69,10 @@ import kotlinx.coroutines.withContext
 /** Width at which list and details sit side by side (the Fold's inner screen, tablets). */
 val TwoPaneWidth = 600.dp
 
+/** Saving new sounds needs Android 10+ (scoped storage); trash needs Android 11+. */
+private val canSave = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+private val canTrash = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+
 @Composable
 fun SoundsScreen(type: SoundType) {
     val context = LocalContext.current
@@ -71,12 +86,32 @@ fun SoundsScreen(type: SoundType) {
     var canChange by remember { mutableStateOf(repo.canChangeDefaults()) }
     var reload by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf<String?>(null) }
+    var editor by remember { mutableStateOf<EditorSource?>(null) }
+    var selectId by remember { mutableStateOf<Long?>(null) } // select a just-saved sound
+
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) editor = EditorSource(uri, repo.displayTitle(uri), isCopy = false)
+    }
+    val trash = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            selected = null
+            reload++
+        }
+    }
+    val addSound = {
+        player.stop()
+        pickFile.launch(arrayOf("audio/*", "video/*"))
+    }
 
     LaunchedEffect(type, reload) {
         val (list, def) = withContext(Dispatchers.IO) { repo.list(type) to repo.currentDefault(type) }
         sounds = list
         current = def
-        selected = selected?.let { s -> list.firstOrNull { it.id == s.id } }
+        val wanted = selectId ?: selected?.id
+        selected = wanted?.let { id -> list.firstOrNull { it.id == id } }
+        selectId = null
     }
     // Re-check after returning from Settings (permission) or another app (new files).
     LifecycleResumeEffect(Unit) {
@@ -105,13 +140,43 @@ fun SoundsScreen(type: SoundType) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val twoPane = maxWidth >= TwoPaneWidth
         val list = @Composable { modifier: Modifier ->
-            SoundList(type, sounds, current, selected?.id, player, modifier) { selected = it }
+            Box(modifier) {
+                SoundList(type, sounds, current, selected?.id, player, Modifier.fillMaxSize()) {
+                    selected = it
+                }
+                if (canSave) {
+                    ExtendedFloatingActionButton(
+                        onClick = addSound,
+                        icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                        text = { Text("Add sound") },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+                    )
+                }
+            }
         }
         val detail = @Composable { sound: Sound, onBack: (() -> Unit)? ->
             SoundDetail(
                 sound, type, isDefault = current?.mediaId == sound.id, canChange = canChange,
                 player = player, onBack = onBack, onSetDefault = setDefault,
                 onGrantAccess = grantAccess,
+                onEdit = if (canSave) {
+                    {
+                        player.stop()
+                        editor = EditorSource(sound.uri, sound.title, isCopy = true)
+                    }
+                } else {
+                    null
+                },
+                onDelete = if (canTrash) {
+                    {
+                        player.stop()
+                        runCatching { repo.trashRequest(sound) }
+                            .onSuccess { trash.launch(IntentSenderRequest.Builder(it).build()) }
+                            .onFailure { message = "Couldn't delete it: " }
+                    }
+                } else {
+                    null
+                },
             )
         }
         if (twoPane) {
@@ -130,6 +195,22 @@ fun SoundsScreen(type: SoundType) {
                 BackHandler { selected = null }
                 detail(sel) { selected = null }
             }
+        }
+    }
+
+    editor?.let { src ->
+        if (canSave) {
+            SoundEditor(
+                source = src,
+                initialType = type,
+                onDismiss = { editor = null },
+                onSaved = { savedType, id, title ->
+                    editor = null
+                    if (savedType == type) selectId = id
+                    reload++
+                    message = "Saved “” to ."
+                },
+            )
         }
     }
 
@@ -155,7 +236,7 @@ private fun SoundList(
     val currentSound = current?.mediaId?.let { id -> sounds.firstOrNull { it.id == id } }
     LazyColumn(
         modifier,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (current != null) {
@@ -164,7 +245,8 @@ private fun SoundList(
         if (sounds.isEmpty()) {
             item(key = "empty") {
                 EmptyState(
-                    "No sounds in this folder yet. Send some from the desktop app.",
+                    "No sounds in this folder yet. Tap Add sound, or send some from the " +
+                        "desktop app.",
                     Modifier.padding(top = 24.dp),
                 )
             }
@@ -231,8 +313,11 @@ private fun SoundDetail(
     onBack: (() -> Unit)?,
     onSetDefault: (Sound) -> Unit,
     onGrantAccess: () -> Unit,
+    onEdit: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
 ) {
     var confirm by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var explainAccess by remember { mutableStateOf(false) }
     val playing = player.playing == sound.uri
 
@@ -302,6 +387,23 @@ private fun SoundDetail(
                         modifier = Modifier.widthIn(min = 200.dp),
                     ) { Text("Set as ${type.label}…") }
                 }
+                if (onEdit != null) {
+                    OutlinedButton(onClick = onEdit, modifier = Modifier.widthIn(min = 200.dp)) {
+                        Icon(Icons.Rounded.ContentCut, contentDescription = null)
+                        Text("  Edit a copy")
+                    }
+                }
+                if (onDelete != null) {
+                    TextButton(
+                        onClick = { if (isDefault) confirmDelete = true else onDelete() },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Icon(Icons.Rounded.Delete, contentDescription = null)
+                        Text("  Delete")
+                    }
+                }
                 if (type == SoundType.RINGTONE) {
                     Text(
                         "On dual-SIM phones this sets SIM 1. Use the desktop app for SIM 2.",
@@ -322,6 +424,22 @@ private fun SoundDetail(
                 TextButton(onClick = { confirm = false; onSetDefault(sound) }) { Text("Change") }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmDelete && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete your ?") },
+            text = {
+                Text(
+                    "“” is your  right now. If you delete it, the " +
+                        "phone goes back to its built-in sound.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Continue") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
     if (explainAccess) {

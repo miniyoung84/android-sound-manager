@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from .. import adb, library, phone_sounds
 from ..journal import Journal
 from ..tools import tool_status
+from .app_sounds_panel import AppSoundsPanel
 from .common import (
     AUDIO_EXTENSIONS,
     DropTable,
@@ -383,6 +384,9 @@ class MainWindow(QMainWindow):
         self.contacts_panel = ContactsPanel(self)
         self.panels.append(self.contacts_panel)
         self.tabs.addTab(self.contacts_panel, "Contacts")
+        self.app_sounds_panel = AppSoundsPanel(self)
+        self.panels.append(self.app_sounds_panel)
+        self.tabs.addTab(self.app_sounds_panel, "App sounds")
 
         central = QWidget()
         layout = QVBoxLayout(central)

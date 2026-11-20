@@ -7,8 +7,9 @@ USB-connected Android phone, from both the desktop and the phone.
 
 > **Status:** early development. The desktop app can download audio from YouTube, extract
 > audio from videos, keep a local sound library, manage the phone's sound folders, set the
-> default ringtone, notification, and alarm sounds, set per-contact ringtones, and trim/fade
-> sounds in a waveform editor. The Android phone app is next.
+> default ringtone, notification, and alarm sounds, set per-contact ringtones, trim/fade
+> sounds in a waveform editor, and show every app's notification categories. The Android phone
+> app lists, adds, edits, and deletes sounds and sets defaults and contact ringtones.
 
 ## Features
 
@@ -23,8 +24,9 @@ USB-connected Android phone, from both the desktop and the phone.
 | ✅ | Set the default ringtone, notification, and alarm sounds (per SIM, with Undo) | Desktop |
 | ✅ | Per-contact ringtones (search, batch apply, Undo) | Desktop |
 | ✅ | Per-contact message sounds (guided: desktop opens the right screen on the phone) | Desktop + phone |
-| ⏳ | One-tap jump to any app's notification category to pick its sound | Phone app |
-| ⏳ | Companion Android app with sound library and basic editing | Phone app |
+| ✅ | App sounds: every app's notification categories, the sound each plays, one click to open it on the phone | Desktop + phone |
+| ✅ | Phone app: browse, preview, and set default sounds; per-contact ringtones | Phone app |
+| ✅ | Phone app: add any audio or video file, edit a copy (trim, fade, volume, normalize), delete to trash | Phone app |
 
 ✅ done · 🧩 backend only · ⏳ planned
 
@@ -103,13 +105,17 @@ Roughly in build order. Check items off as they land.
 - [x] Sound library screen with a two-pane layout for the Fold's inner screen
 - [x] Set default ringtone / notification / alarm (`WRITE_SETTINGS` special access)
 - [x] Per-contact ringtones on the phone itself (`ContactsContract.Contacts.CUSTOM_RINGTONE`)
-- [ ] Hands-on check of every screen on the Fold (inner and cover screens)
-- [ ] List installed apps' notification categories and deep-link to each one's sound setting
-- [ ] Basic on-phone trimming (Media3 Transformer)
+- [x] Hands-on check of the main screens on the Fold (inner and cover screens)
+- [x] Add sounds from any audio or video file on the phone (saved crash-safe: hidden until complete)
+- [x] On-phone editor: waveform, trim, fade in/out, volume or normalize, preview; saves a copy
+  using the phone's own decoders and AAC encoder (device tests run the real codecs)
+- [x] Delete a sound to the phone's trash (recoverable for 30 days)
+- [ ] App sounds on the phone itself (Android only shows other apps' categories to the desktop)
 - [ ] Local socket server so the desktop can drive it via `adb forward`
 
 ### Milestone 6: Desktop + phone together
-- [ ] Desktop: assign a sound to an app's notification category (copy file, then open that settings page on the phone)
+- [x] Desktop App sounds tab: every app's notification categories with their current sound;
+  opens the exact category's settings on the phone (Android doesn't let other apps change it)
 - [ ] Install or update the companion APK from the desktop (`adb install`)
 - [ ] Wireless ADB pairing as an alternative to USB
 

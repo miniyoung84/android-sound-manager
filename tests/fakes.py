@@ -32,6 +32,8 @@ class FakePhone:
         self.rescanned: list[str] = []
         self.started: list[list[str]] = []
         self.sms_app = "com.google.android.apps.messaging"
+        self.notification_dump = ""
+        self.launcher_apps: list[str] = []
         if samsung:
             for key in ("ringtone", "notification_sound", "alarm_alert"):
                 self.settings.setdefault(key + "_CONSTANT_PATH", "?path=%2Fsystem%2Fx.ogg")
@@ -85,6 +87,10 @@ class FakePhone:
                 return self.sms_app + "\n"
             case ["input", "keyevent", _]:
                 return ""
+            case ["dumpsys", "notification", "--noredact"]:
+                return self.notification_dump
+            case ["cmd", "package", "query-activities", "--components", *_]:
+                return "".join(f"{p}/.MainActivity\n" for p in self.launcher_apps)
             case ["am", "start", "--user", "current", *rest]:
                 self.started.append(rest)
                 return "Starting: Intent { ... }\n"

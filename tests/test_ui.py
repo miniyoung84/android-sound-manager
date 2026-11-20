@@ -9,7 +9,7 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from soundmanager import adb, phone_contacts, phone_sounds  # noqa: E402
+from soundmanager import adb, phone_apps, phone_contacts, phone_sounds  # noqa: E402
 from soundmanager.journal import Journal  # noqa: E402
 from soundmanager.ui import contacts_panel as cp  # noqa: E402
 from soundmanager.ui import main_window as mw  # noqa: E402
@@ -297,3 +297,52 @@ def test_message_sound_dialog_guides_and_opens_settings(window, monkeypatch):
     dlg.open_conversations()
     assert wait_until(lambda: opened and not window.runner.busy)
     dlg.accept()
+
+
+# --------------------------------------------------------------------------- app sounds
+
+APPS = [
+    phone_apps.App(
+        "com.example.chat",
+        channels=[
+            phone_apps.Channel("dm", "Direct messages", 4, phone_apps.DEFAULT_NOTIFICATION_URI),
+            phone_apps.Channel("promo", "Promotions", 2, phone_apps.DEFAULT_NOTIFICATION_URI),
+        ],
+    ),
+    phone_apps.App(
+        "com.example.news", blocked=True, channels=[phone_apps.Channel("a", "All", 3, None)]
+    ),
+]
+
+
+def test_app_sounds_loads_filters_and_opens(window, monkeypatch):
+    panel = window.app_sounds_panel
+    assert panel.tree.topLevelItemCount() == 0  # not loaded until the tab is shown
+    opened = []
+    monkeypatch.setattr(phone_apps, "list_apps", lambda dev, launcher_only=True: list(APPS))
+    monkeypatch.setattr(
+        phone_apps,
+        "describe_sounds",
+        lambda dev, apps: {phone_apps.DEFAULT_NOTIFICATION_URI: "Default"},
+    )
+    monkeypatch.setattr(
+        phone_apps, "open_channel_settings", lambda dev, pkg, cid: opened.append((pkg, cid))
+    )
+    panel.reload()
+    assert wait_until(lambda: panel.tree.topLevelItemCount() == 2 and not window.runner.busy)
+    chat = panel.tree.topLevelItem(0)
+    assert chat.text(0) == "Example" and chat.child(0).text(1) == "Default"
+    assert "Silent category" in chat.child(1).text(2)
+    assert panel.tree.topLevelItem(1).child(0).text(2) == "Notifications off"
+
+    panel.only_sound.setChecked(True)  # hides the silent category and the blocked app
+    assert chat.child(1).isHidden() and panel.tree.topLevelItem(1).isHidden()
+    panel.search.setText("direct")
+    assert not chat.isHidden() and not chat.child(0).isHidden()
+
+    assert not panel.open_button.isEnabled()
+    panel.tree.setCurrentItem(chat.child(0))
+    assert panel.open_button.isEnabled()
+    panel.open_selected()
+    assert wait_until(lambda: opened and not window.runner.busy)
+    assert opened == [("com.example.chat", "dm")]

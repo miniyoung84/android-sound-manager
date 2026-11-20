@@ -26,7 +26,8 @@ def default_messaging_app(dev: AdbDevice) -> str:
     return value if valid_package(value) else FALLBACK_MESSAGING_APP
 
 
-def _start(dev: AdbDevice, *args: str) -> None:
+def start_settings(dev: AdbDevice, *args: str) -> None:
+    """Wake the phone and run `am start` with *args* (each one quoted for the phone's shell)."""
     dev.shell("input keyevent KEYCODE_WAKEUP")  # turn the screen on; the user still unlocks
     out = dev.shell("am start --user current " + " ".join(shlex.quote(a) for a in args))
     if "Error" in out or "unable to resolve" in out.lower():
@@ -35,14 +36,14 @@ def _start(dev: AdbDevice, *args: str) -> None:
 
 def open_conversation_settings(dev: AdbDevice) -> None:
     """Settings > Notifications > Conversations (recent and priority conversations)."""
-    _start(dev, "-a", "android.settings.CONVERSATION_SETTINGS")
+    start_settings(dev, "-a", "android.settings.CONVERSATION_SETTINGS")
 
 
 def open_app_notification_settings(dev: AdbDevice, package: str) -> None:
     """An app's notification settings page (all its categories)."""
     if not valid_package(package):
         raise AdbError("Not a valid app package name.")
-    _start(
+    start_settings(
         dev,
         "-a",
         "android.settings.APP_NOTIFICATION_SETTINGS",

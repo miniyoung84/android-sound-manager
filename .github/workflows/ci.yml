@@ -65,7 +65,7 @@ jobs:
 
       - name: Build debug APK and run lint
         working-directory: android
-        run: ./gradlew assembleDebug lintDebug --console=plain
+        run: ./gradlew assembleDebug lintDebug testDebugUnitTest --console=plain
 
   secrets:
     name: Secret scan (full history)
